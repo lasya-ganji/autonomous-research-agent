@@ -1,32 +1,70 @@
-from typing import Dict, Any, List
+from typing import List
 from pydantic import ValidationError
+from datetime import datetime, timezone
 
+from models.state import ResearchState
 from models.planner_models import PlanStep
 from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
-from utils.prompt_loader import load_prompt
 
 
-def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
+def planner_node(state: ResearchState) -> ResearchState:
     
     # Extract input
-    query: str = state.get("query")
+    query: str = state.query
 
     if not query:
         raise ValueError("Query missing in state")
 
-    # Replan logic based on state
-    is_replan: bool = state.get("replan_count", 0) > 0
+    # Replan logic
+    is_replan: bool = state.replan_count > 0
 
-    # Load prompt
-    prompt_template = load_prompt(
-        "planner_replan.txt" if is_replan else "planner_initial.txt"
-    )
+    # TEMPORARY PROMPT (prompt files not implemented yet)
+    if is_replan:
+        prompt = f"""
+You are a research planner.
 
-    prompt = prompt_template.format(
-        query=query,
-        previous_plan=state.get("research_plan", [])
-    )
+The previous plan was not sufficient. Improve it.
+
+Query: {query}
+
+Generate 3-5 better sub-questions.
+
+Return ONLY a JSON array in this format:
+[
+  {{
+    "step_id": 1,
+    "question": "...",
+    "priority": 5
+  }}
+]
+
+Rules:
+- Do NOT return empty list
+- No explanation
+"""
+    else:
+        prompt = f"""
+You are a research planner.
+
+Break the following query into 3-5 meaningful sub-questions.
+
+Query: {query}
+
+Return ONLY a JSON array in this format:
+[
+  {{
+    "step_id": 1,
+    "question": "...",
+    "priority": 5
+  }}
+]
+
+Rules:
+- Generate at least 3 steps
+- Do NOT return empty list
+- No explanation
+"""
 
     # Call LLM
     response = call_llm(
@@ -34,6 +72,8 @@ def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
         temperature=0.2,
         expect_json=True
     )
+
+    print("\n[PLANNER RESPONSE]:", response)
 
     # Validate response
     plan: List[PlanStep] = []
@@ -43,24 +83,27 @@ def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 plan.append(PlanStep(**item))
             except ValidationError as e:
-                state.setdefault("errors", []).append(
+                state.errors.append(
                     ErrorLog(
                         node="planner_node",
-                        error_type="validation_error",
-                        message=str(e)
-                    ).model_dump()
+                        error_type="parsing_error",
+                        message=str(e),
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        severity="ERROR"
+                    )
                 )
     else:
-        # Invalid LLM output
-        state.setdefault("errors", []).append(
+        state.errors.append(
             ErrorLog(
                 node="planner_node",
-                error_type="invalid_llm_response",
-                message=str(response)
-            ).model_dump()
+                error_type="parsing_error",
+                message=str(response),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                severity="ERROR"
+            )
         )
 
-    # Fallback plan
+    # Fallback plan (safety)
     if not plan:
         plan = [
             PlanStep(
@@ -73,23 +116,19 @@ def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
     # Sort by priority
     plan = sorted(plan, key=lambda x: x.priority, reverse=True)
 
-    # Update state
     # Store plan
-    state["research_plan"] = [p.model_dump() for p in plan]
+    state.research_plan = plan
 
-    # Reset search results for new plan
-    state["search_results"] = {}
+    # Reset search results
+    state.search_results = {}
 
-    # Track unresolved steps (IMPORTANT)
-    state["unresolved_steps"] = list(range(len(plan)))
+    # Track unresolved steps
+    state.unresolved_steps = list(range(len(plan)))
 
-    # Reset counters
-    state["search_retry_count"] = 0
+    # Reset retry counter
+    state.search_retry_count = 0
 
     # Observability
-    state["node_execution_count"] = state.get("node_execution_count", 0) + 1
-
-    # Routing hint
-    state["next_node"] = "searcher_node"
+    state.node_execution_count += 1
 
     return state
