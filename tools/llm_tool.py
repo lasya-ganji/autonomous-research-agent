@@ -3,20 +3,19 @@ import json
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-#Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Safe JSON parser
+
 def safe_json_parse(text: str):
     try:
         return json.loads(text)
     except Exception:
         return None
 
-# Core LLM call
+
 @retry(
-    stop=stop_after_attempt(3),                
-    wait=wait_exponential(min=1, max=5)        
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=5)
 )
 def call_llm(
     prompt: str,
@@ -25,18 +24,15 @@ def call_llm(
 ):
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",  
             temperature=temperature,
-
-            #Force JSON only when needed
             response_format={"type": "json_object"} if expect_json else None,
-
             messages=[
                 {
                     "role": "system",
                     "content": (
                         "You are a precise and reliable AI assistant. "
-                        "Always follow instructions strictly. "
+                        "Follow instructions strictly."
                         "If JSON is required, return ONLY valid JSON."
                     )
                 },
@@ -44,43 +40,31 @@ def call_llm(
                     "role": "user",
                     "content": prompt
                 }
-            ]
+            ],
+            timeout=30 \
         )
 
-        #Extract response text
         content = response.choices[0].message.content
 
-        
-        # JSON MODE (Evaluator / Planner)
-       
+        # JSON MODE
         if expect_json:
             parsed = safe_json_parse(content)
 
             if parsed is None:
-                #Instead of crashing → return safe fallback
+                
                 return {
                     "error": "invalid_json",
-                    "raw_output": content,
-                    "score": 0,
-                    "confidence": "low"
+                    "raw_output": content
                 }
 
             return parsed
 
-       
-        # TEXT MODE (Synthesiser)
-    
+        # TEXT MODE
         return content
 
     except Exception as e:
-        print(f"[LLM Error] {e}")
-
-        # FINAL fallback (even after retries fail)
-        if expect_json:
-            return {
-                "error": "llm_failure",
-                "score": 0,
-                "confidence": "low"
-            }
-
-        return "LLM failed to generate response."
+        #return structured error only
+        return {
+            "error": "llm_failure",
+            "message": str(e)
+        }
