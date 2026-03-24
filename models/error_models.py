@@ -5,5 +5,5 @@ class ErrorLog(BaseModel):
     node: str
     timestamp: str
     severity: SeverityEnum
-    type: ErrorTypeEnum
+    error_type: ErrorTypeEnum
     message: str

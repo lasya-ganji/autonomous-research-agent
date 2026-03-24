@@ -51,5 +51,4 @@ class ResearchState(BaseModel):
     errors: List[ErrorLog] = Field(default_factory=list)
 
     caches: List[CacheModel] = Field(default_factory=list)
-    failed_queries: List[str] = Field(default_factory=list
-)
+    failed_queries: List[str] = Field(default_factory=list)
