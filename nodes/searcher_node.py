@@ -1,26 +1,33 @@
 from models.state import ResearchState
-from models.search_models import SearchResult
+from tools.search_tool import search_tool
+from services.evaluation.scoring_service import score_results
+
 
 def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
 
-    # Dummy search result
-    state.search_results = {
-        1: [
-            SearchResult(
-                citation_id="1",
-                url="https://example.com",
-                title="Sample Result",
-                snippet="Sample snippet",
-                content="Sample content",
-                quality_score=0.8,
-                relevance_score=0.9,
-                recency_score=0.7,
-                domain_score=0.8,
-                depth_score=0.6,
-                rank=1
-            )
-        ]
-    }
+    try:
+        query = state.query
 
-    return state
+        results = search_tool(query)
+
+        if not results:
+            print("[SEARCHER NODE] No results found")
+            state.failed_queries.append(query)
+            state.search_retry_count += 1
+            return state
+
+        # Apply scoring
+        results = score_results(results, query)
+
+        # Store results
+        state.search_results[1] = results
+
+        print(f"[SEARCHER NODE] Stored {len(results)} scored results")
+
+        return state
+
+    except Exception as e:
+        print(f"[SEARCHER NODE ERROR] {e}")
+        state.failed_queries.append(state.query)
+        return state
