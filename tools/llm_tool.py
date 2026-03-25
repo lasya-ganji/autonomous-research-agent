@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -35,7 +36,7 @@ Follow instructions EXACTLY.
 If JSON is requested:
 - Return ONLY valid JSON
 - Do NOT include explanations, greetings, or extra text
-- If a list is requested, return a JSON array []
+- Ensure output is parseable using json.loads()
 """
             },
             {
@@ -57,6 +58,7 @@ If JSON is requested:
 
         if expect_json:
             try:
+                content = re.sub(r"```json|```", "", content).strip()
                 parsed = json.loads(content)
 
                 # Handle case where model wraps list in object

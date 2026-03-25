@@ -1,36 +1,13 @@
-from pydantic import BaseModel, Field
-from typing import Dict
+from pydantic import BaseModel
+from typing import List
 
 
-class ScoringWeights(BaseModel):
-    relevance: float = Field(ge=0, le=1)
-    recency: float = Field(ge=0, le=1)
-    domain: float = Field(ge=0, le=1)
-    depth: float = Field(ge=0, le=1)
-
-
-class ScoreBreakdown(BaseModel):
-    relevance: float = Field(ge=0, le=1)
-    domain: float = Field(ge=0, le=1)
-    recency: float = Field(ge=0, le=1)
-    depth: float = Field(ge=0, le=1)
-
-
-class DocumentScore(BaseModel):
-    citation_id: str
-    final_score: float = Field(ge=0, le=1)
-    breakdown: ScoreBreakdown
-
-
-class ConfidenceMetrics(BaseModel):
-    average_score: float = Field(ge=0, le=1)
-    agreement: float = Field(ge=0, le=1)
-    consistency: float = Field(ge=0, le=1)
-    top_k_margin: float = Field(ge=0, le=1)
+class StepEvaluation(BaseModel):
+    step_id: int
+    confidence_score: float
+    passed: bool
 
 
 class EvaluationResult(BaseModel):
-    confidence_score: float = Field(ge=0, le=1)
-    decision: str  # retry | replan | proceed
-    weights: ScoringWeights
-    metrics: ConfidenceMetrics
+    steps: List[StepEvaluation]
+    decision: str  # "proceed" | "retry" | "replan"

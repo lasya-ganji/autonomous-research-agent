@@ -4,6 +4,7 @@ from typing import List, Dict, Set
 from models.enums import DecisionEnum
 from models.planner_models import PlanStep
 from models.search_models import SearchResult
+from models.evaluation_models import EvaluationResult
 from models.citation_models import Citation
 from models.synthesis_models import SynthesisModel
 from models.report_models import ReportModel
@@ -34,7 +35,7 @@ class ResearchState(BaseModel):
     synthesis: SynthesisModel | None = None
     report: ReportModel | None = None
 
-    evaluation: Evaluation = Evaluation()
+    evaluation: EvaluationResult | None = None
 
     search_retry_count: int = Field(ge=0, default=0)
     replan_count: int = Field(ge=0, default=0)
