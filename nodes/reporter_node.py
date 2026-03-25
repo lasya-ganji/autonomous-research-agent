@@ -1,20 +1,47 @@
 from models.state import ResearchState
 from models.report_models import ReportModel
+from tools.llm_tool import call_llm
+from utils.prompt_loader import load_prompt
+from datetime import datetime
+
 
 def reporter_node(state: ResearchState) -> ResearchState:
     print("Reporter Node")
 
-    report = ReportModel(
+    # Prepare synthesis text
+    synthesis_text = "\n".join(
+        [f"- {claim.text}" for claim in state.synthesis.claims]
+    )
+
+    # Prepare citations
+    citations_list = list(state.citations.values())[:5]
+
+    citations_text = "\n".join(
+        [f"[{i+1}] {c.url}" for i, c in enumerate(citations_list)]
+    )
+
+    # Load prompt
+    prompt_template = load_prompt("reporter.txt")
+
+    prompt = prompt_template.format(
+        query=state.query,
+        synthesis=synthesis_text,
+        citations=citations_text
+    )
+
+    # Call LLM
+    response = call_llm(prompt=prompt, temperature=0.3)
+
+    # Store clean report
+    state.report = ReportModel(
         title="Research Report",
-        sections=[claim.text for claim in state.synthesis.claims],
+        sections=[response],   
         citations=list(state.citations.keys()),
         metadata={
             "query": state.query,
-            "timestamp": "2026-01-01",
-            "model": "gpt-4o",
-            "word_count": 100
+            "timestamp": datetime.now().isoformat(),
+            "model": "llm"
         }
     )
 
-    state.report = report
     return state
