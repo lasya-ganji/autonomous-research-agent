@@ -28,19 +28,19 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 - Ensure output is parseable using json.loads()
 
 [
-  {
+  {{
     "step_id": 1,
     "question": "string",
     "priority": 1
-  },
-  {
+  }},
+  {{
     "step_id": 2,
     "question": "string",
     "priority": 2
-  },
-  {
+  }},
+  {{
     "step_id": 3,
     "question": "string",
     "priority": 3
-  }
+  }}
 ]

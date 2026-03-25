@@ -6,10 +6,10 @@ def run_agent(query: str):
     graph = build_graph()
     
     graph_obj = graph.get_graph()
-    png_bytes = graph_obj.draw_mermaid_png()
+    # png_bytes = graph_obj.draw_mermaid_png()
 
-    with open("graph.png", "wb") as f:
-        f.write(png_bytes)
+    # with open("graph.png", "wb") as f:
+    #     f.write(png_bytes)
         
     result = graph.invoke(state)
     return result
