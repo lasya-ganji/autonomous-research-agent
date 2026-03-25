@@ -7,23 +7,38 @@ def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
 
     try:
-        query = state.query
+        # Loop through each planned step
+        for step in state.research_plan:
+            step_id = step.step_id
+            query = step.question
 
-        results = search_tool(query)
+            print(f"[SEARCHER NODE] Step {step_id}: {query}")
 
-        if not results:
-            print("[SEARCHER NODE] No results found")
-            state.failed_queries.append(query)
+            results = search_tool(query)
+
+            # Handle no results
+            if not results:
+                print(f"[SEARCHER NODE] No results for step {step_id}")
+                state.failed_queries.append(query)
+                continue
+
+            # Apply scoring
+            results = score_results(results, query)
+
+            # Store results per step_id
+            state.search_results[step_id] = results
+
+            print(f"[SEARCHER NODE] Stored {len(results)} results for step {step_id}")
+
+        # Update unresolved steps
+        state.unresolved_steps = [
+            step.step_id for step in state.research_plan
+            if step.step_id not in state.search_results
+        ]
+
+        # Retry logic
+        if not state.search_results:
             state.search_retry_count += 1
-            return state
-
-        # Apply scoring
-        results = score_results(results, query)
-
-        # Store results
-        state.search_results[1] = results
-
-        print(f"[SEARCHER NODE] Stored {len(results)} scored results")
 
         return state
 
