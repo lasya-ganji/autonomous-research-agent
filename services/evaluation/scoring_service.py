@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 
 
 # DEFAULT WEIGHTS (fallback)
-
 DEFAULT_WEIGHTS = {
     "relevance": 0.5,
     "recency": 0.2,
@@ -12,13 +11,25 @@ DEFAULT_WEIGHTS = {
     "depth": 0.1
 }
 
+# DEDUPLICATION (Stage 1)
 
-# VALIDATION LAYER (partial)
+def deduplicate_results(results: List[SearchResult]) -> List[SearchResult]:
+    seen_urls = set()
+    unique_results = []
+
+    for r in results:
+        if r.url and r.url not in seen_urls:
+            seen_urls.add(r.url)
+            unique_results.append(r)
+
+    return unique_results
+
+
+# VALIDATION LAYER
 
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
 
-    # Normalize
-    total = sum(weights.values())
+    total = sum(weights.values()) or 1
     weights = {k: v / total for k, v in weights.items()}
 
     # Minimum thresholds (anchoring)
@@ -28,7 +39,7 @@ def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
     weights["depth"] = max(weights["depth"], 0.05)
 
     # Renormalize again
-    total = sum(weights.values())
+    total = sum(weights.values()) or 1
     weights = {k: v / total for k, v in weights.items()}
 
     return weights
@@ -37,13 +48,14 @@ def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
 # SIGNALS
 
 def compute_relevance(result: SearchResult, query: str) -> float:
-    query_words = set(query.lower().split())
-    title_words = set(result.title.lower().split())
-    snippet_words = set(result.snippet.lower().split())
+    query_words = set((query or "").lower().split())
+    title_words = set((result.title or "").lower().split())
+    snippet_words = set((result.snippet or "").lower().split())
 
-    # overlap score
-    title_overlap = len(query_words & title_words) / len(query_words)
-    snippet_overlap = len(query_words & snippet_words) / len(query_words)
+    denominator = len(query_words) or 1
+
+    title_overlap = len(query_words & title_words) / denominator
+    snippet_overlap = len(query_words & snippet_words) / denominator
 
     score = 0.6 * title_overlap + 0.4 * snippet_overlap
 
@@ -52,7 +64,7 @@ def compute_relevance(result: SearchResult, query: str) -> float:
 
 def compute_domain(result: SearchResult) -> float:
     try:
-        domain = urlparse(str(result.url)).netloc
+        domain = urlparse(str(result.url)).netloc.lower()
 
         if "gov" in domain or "edu" in domain or "nih" in domain:
             return 0.9
@@ -61,17 +73,17 @@ def compute_domain(result: SearchResult) -> float:
         else:
             return 0.6
 
-    except:
+    except Exception:
         return 0.5
 
 
 def compute_recency(result: SearchResult) -> float:
-    # No date yet → neutral (future upgrade)
+    # Placeholder (PRD full logic later)
     return 0.5
 
 
 def compute_depth(result: SearchResult) -> float:
-    length = len(result.snippet)
+    length = len(result.snippet or "")
 
     if length > 300:
         return 0.9
@@ -81,18 +93,24 @@ def compute_depth(result: SearchResult) -> float:
         return 0.5
 
 
+
 # MAIN SCORING FUNCTION
+
 def score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
 
+    # Step 1: Deduplicate
+    results = deduplicate_results(results)
+
+    # Step 2: Validate weights
     weights = validate_weights(DEFAULT_WEIGHTS)
 
+    # Step 3: Compute scores
     for r in results:
         r.relevance_score = compute_relevance(r, query)
         r.domain_score = compute_domain(r)
         r.recency_score = compute_recency(r)
         r.depth_score = compute_depth(r)
 
-        # Final weighted score
         final_score = (
             weights["relevance"] * r.relevance_score +
             weights["domain"] * r.domain_score +
@@ -102,10 +120,10 @@ def score_results(results: List[SearchResult], query: str) -> List[SearchResult]
 
         r.quality_score = final_score
 
-    # Sort
+    # Step 4: Sort
     results.sort(key=lambda x: x.quality_score, reverse=True)
 
-    # Assign rank
+    # Step 5: Assign rank
     for i, r in enumerate(results):
         r.rank = i + 1
 
