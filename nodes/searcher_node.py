@@ -1,10 +1,13 @@
 from models.state import ResearchState
 from tools.search_tool import search_tool
 from services.evaluation.scoring_service import score_results
+from utils.logger import log_node_execution
+import time
 
 
 def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
+    start_time = time.time()
 
     try:
         # Loop through each planned step
@@ -40,9 +43,19 @@ def searcher_node(state: ResearchState) -> ResearchState:
         if not state.search_results:
             state.search_retry_count += 1
 
-        return state
-
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
         state.failed_queries.append(state.query)
-        return state
+
+    # ALWAYS log (even if exception happens)
+    log_node_execution(
+        node_name="searcher_node",
+        input_data=state.query,
+        output_data={k: len(v) for k, v in state.search_results.items()},
+        start_time=start_time
+    )
+
+    # Observability
+    state.node_execution_count += 1
+
+    return state

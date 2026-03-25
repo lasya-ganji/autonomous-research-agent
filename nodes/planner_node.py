@@ -6,8 +6,12 @@ from models.state import ResearchState
 from models.planner_models import PlanStep
 from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
-from utils.prompt_loader import load_prompt
 
+from utils.prompt_loader import load_prompt
+from utils.logger import log_node_execution
+import time
+
+start_time = time.time()
 
 def planner_node(state: ResearchState) -> ResearchState:
 
@@ -100,4 +104,11 @@ def planner_node(state: ResearchState) -> ResearchState:
     # Observability
     state.node_execution_count += 1
 
+    log_node_execution(
+    node_name="planner_node",
+    input_data=query,
+    output_data=[step.model_dump() for step in plan],
+    start_time=start_time
+    )
+    
     return state
