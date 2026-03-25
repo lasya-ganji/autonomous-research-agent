@@ -6,10 +6,11 @@ from models.state import ResearchState
 from models.planner_models import PlanStep
 from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
+from utils.prompt_loader import load_prompt
 
 
 def planner_node(state: ResearchState) -> ResearchState:
-    
+
     # Extract input
     query: str = state.query
 
@@ -19,57 +20,18 @@ def planner_node(state: ResearchState) -> ResearchState:
     # Replan logic
     is_replan: bool = state.replan_count > 0
 
-    # TEMPORARY PROMPT (prompt files not implemented yet)
+    # Load prompt
     if is_replan:
-        prompt = f"""
-You are a research planner.
-
-The previous plan was not sufficient. Improve it.
-
-Query: {query}
-
-Generate 3-5 better sub-questions.
-
-Return ONLY a JSON array in this format:
-[
-  {{
-    "step_id": 1,
-    "question": "...",
-    "priority": 5
-  }}
-]
-
-Rules:
-- Do NOT return empty list
-- No explanation
-"""
+        prompt_template = load_prompt("planner_replan.txt")
     else:
-        prompt = f"""
-You are a research planner.
+        prompt_template = load_prompt("planner_initial.txt")
 
-Break the following query into 3-5 meaningful sub-questions.
-
-Query: {query}
-
-Return ONLY a JSON array in this format:
-[
-  {{
-    "step_id": 1,
-    "question": "...",
-    "priority": 5
-  }}
-]
-
-Rules:
-- Generate at least 3 steps
-- Do NOT return empty list
-- No explanation
-"""
+    prompt = prompt_template.format(query=query)
 
     # Call LLM
     response = call_llm(
         prompt=prompt,
-        temperature=0.2,
+        temperature=0,   # deterministic (as per PRD)
         expect_json=True
     )
 
@@ -113,7 +75,14 @@ Rules:
             )
         ]
 
-    # Sort by priority
+    # 🔹 Enforce max 3 steps (PRD requirement)
+    plan = plan[:3]
+
+    # 🔹 Ensure step_ids are consistent (1,2,3...)
+    for idx, step in enumerate(plan, start=1):
+        step.step_id = idx
+
+    # Sort by priority (optional but fine)
     plan = sorted(plan, key=lambda x: x.priority, reverse=True)
 
     # Store plan
@@ -122,8 +91,8 @@ Rules:
     # Reset search results
     state.search_results = {}
 
-    # Track unresolved steps
-    state.unresolved_steps = list(range(len(plan)))
+    # 🔹 Track unresolved steps correctly (use step_ids, not index)
+    state.unresolved_steps = [step.step_id for step in plan]
 
     # Reset retry counter
     state.search_retry_count = 0
