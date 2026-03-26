@@ -1,4 +1,7 @@
+from observability.langsmith_config import setup_langsmith
 from app.agent_runner import run_agent
+
+setup_langsmith()
 
 if __name__ == "__main__":
     result = run_agent("What are the latest advancements in renewable energy technologies?")

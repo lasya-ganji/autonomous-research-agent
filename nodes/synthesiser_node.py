@@ -2,9 +2,10 @@ from models.state import ResearchState
 from models.synthesis_models import SynthesisModel, Claim
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
+from observability.tracing import trace_node
 import json
 
-
+@trace_node("synthesiser_node")
 def synthesiser_node(state: ResearchState) -> ResearchState:
     print("Synthesiser Node")
 

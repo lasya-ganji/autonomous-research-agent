@@ -1,6 +1,9 @@
 from models.state import ResearchState
 from models.citation_models import Citation
+from observability.tracing import trace_node
 
+
+@trace_node("citation_manager_node")
 def citation_manager_node(state: ResearchState) -> ResearchState:
     print("Citation Manager Node")
 

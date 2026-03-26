@@ -10,8 +10,10 @@ from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
+from observability.tracing import trace_node
 
 
+@trace_node("planner_node")
 def planner_node(state: ResearchState) -> ResearchState:
     start_time = time.time()
 

@@ -2,9 +2,10 @@ from models.state import ResearchState
 from models.report_models import ReportModel
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
+from observability.tracing import trace_node
 from datetime import datetime
 
-
+@trace_node("reporter_node")
 def reporter_node(state: ResearchState) -> ResearchState:
     print("Reporter Node")
 

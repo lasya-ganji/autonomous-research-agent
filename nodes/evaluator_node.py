@@ -4,11 +4,14 @@ from models.evaluation_models import StepEvaluation, EvaluationResult
 from services.evaluation.scoring_service import score_results
 from services.evaluation.confidence_service import compute_confidence
 
+from observability.tracing import trace_node
+
 THRESHOLD = 0.5  
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
 
 
+@trace_node("evaluator_node")
 def evaluator_node(state: ResearchState) -> ResearchState:
     print("Evaluator Node")
 

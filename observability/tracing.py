@@ -5,13 +5,15 @@ def trace_node(node_name: str):
     
     def decorator(func):
         def wrapper(state, *args, **kwargs):
+            start = time.time()
 
-            print(f"[TRACE] → {node_name}")   #entry log
+            print(f"[TRACE] → {node_name}")
 
             try:
                 result = func(state, *args, **kwargs)
 
-                print(f"[TRACE] ← {node_name}")    #exit log
+                duration = round((time.time() - start) * 1000, 2)
+                print(f"[TRACE] ← {node_name} ({duration} ms)")
 
                 return result
 

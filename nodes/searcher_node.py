@@ -1,9 +1,10 @@
 from models.state import ResearchState
 from tools.search_tool import search_tool
 from utils.logger import log_node_execution
+from observability.tracing import trace_node
 import time
 
-
+@trace_node("searcher_node")
 def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
     start_time = time.time()
