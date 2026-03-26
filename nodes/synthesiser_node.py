@@ -39,9 +39,15 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
     # Call LLM
     response = call_llm(
         prompt=prompt,
-        temperature=0,
-        expect_json=True
+        temperature=0
     )
+    
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+        except Exception as e:
+            print("[SYNTHESIS ERROR] Failed to parse JSON:", e)
+            response = {}
 
     print("[SYNTHESIS RAW]:", response)
 
