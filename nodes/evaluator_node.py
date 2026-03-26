@@ -1,13 +1,9 @@
 from models.state import ResearchState
 from models.evaluation_models import StepEvaluation, EvaluationResult
 
-
-# Base threshold for confidence (adjusted for current scoring system)
-THRESHOLD = 0.45
-
-# Retry limits (as per design decisions)
-MAX_SEARCH_RETRIES = 1   # Only 1 retry for low-confidence results
-MAX_REPLANS = 1          # Only 1 replan allowed
+THRESHOLD = 0.4
+MAX_SEARCH_RETRIES = 1
+MAX_REPLANS = 1
 
 
 def evaluator_node(state: ResearchState) -> ResearchState:
@@ -16,22 +12,24 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     step_evaluations = []
     failed_steps = 0
 
-    #  Iterate through results of each planned step
-    for step_id, results in state.search_results.items():
+    for step in state.research_plan:
+        step_id = step.step_id
+        results = state.search_results.get(step_id, [])
 
-        # Extract quality scores (already computed in scoring_service)
-        scores = [r.quality_score for r in results]
+        if not results:
+            avg_score = 0.0
+            passed = False
+            scores = []
+        else:
+            scores = [r.quality_score for r in results]
+            avg_score = sum(scores) / len(scores)
+            passed = avg_score >= THRESHOLD
 
-        # Compute average confidence for this step
-        avg_score = sum(scores) / len(scores) if scores else 0.0
-
-        # Check if this step passed quality threshold
-        passed = avg_score >= THRESHOLD
+        print(f"[EVALUATOR DEBUG] Step {step_id} scores:", scores, "avg:", avg_score)
 
         if not passed:
             failed_steps += 1
 
-        # Store per-step evaluation
         step_evaluations.append(
             StepEvaluation(
                 step_id=step_id,
@@ -42,44 +40,39 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
     total_steps = len(step_evaluations)
 
-    # DECISION LOGIC (CORE INTELLIGENCE)
+    # DECISION LOGIC
 
-    # Case 0: No steps evaluated → force replan
     if total_steps == 0:
         decision = "replan"
+        state.failure_reason = "No steps evaluated"
 
-    # Case 1: Majority steps failed → directly replan
-    elif failed_steps / total_steps > 0.5:
-
+    elif failed_steps == total_steps:
         if state.replan_count < MAX_REPLANS:
             decision = "replan"
             state.replan_count += 1
+            state.failure_reason = "All steps failed due to low confidence"
         else:
-            # Prevent infinite loop → proceed anyway
             decision = "proceed"
+            state.failure_reason = "Max replans reached, proceeding anyway"
 
-    # Case 2: Partial failure → retry once, then replan
     elif failed_steps > 0:
-
-        # First try → retry search (same plan)
         if state.search_retry_count < MAX_SEARCH_RETRIES:
             decision = "retry"
             state.search_retry_count += 1
-
-        # If retry already done → replan
+            state.failure_reason = "Partial failure, retrying search"
         elif state.replan_count < MAX_REPLANS:
             decision = "replan"
             state.replan_count += 1
-
-        # If both retry + replan done → proceed
+            state.failure_reason = "Retry failed, replanning"
         else:
             decision = "proceed"
+            state.failure_reason = "Max retries and replans reached"
 
-    # Case 3: All steps passed → proceed
     else:
         decision = "proceed"
+        state.failure_reason = ""
 
-    #  Store evaluation result in state
+    # Store evaluation
     state.evaluation = EvaluationResult(
         steps=step_evaluations,
         decision=decision

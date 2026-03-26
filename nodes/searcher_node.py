@@ -10,8 +10,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
     start_time = time.time()
 
     try:
-        # Loop through each planned step
-        for step in state.research_plan:
+        for step in sorted(state.research_plan, key=lambda x: x.priority):
             step_id = step.step_id
             query = step.question
 
@@ -19,35 +18,27 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             results = search_tool(query)
 
-            # Handle no results
             if not results:
                 print(f"[SEARCHER NODE] No results for step {step_id}")
                 state.failed_queries.append(query)
                 continue
 
-            # Apply scoring
             results = score_results(results, query)
 
-            # Store results per step_id
             state.search_results[step_id] = results
 
-            print(f"[SEARCHER NODE] Stored {len(results)} results for step {step_id}")
-
-        # Update unresolved steps
         state.unresolved_steps = [
             step.step_id for step in state.research_plan
             if step.step_id not in state.search_results
         ]
 
-        # Retry logic
-        if not state.search_results:
+        if state.unresolved_steps:
             state.search_retry_count += 1
 
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
         state.failed_queries.append(state.query)
 
-    # ALWAYS log (even if exception happens)
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
@@ -55,7 +46,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
         start_time=start_time
     )
 
-    # Observability
     state.node_execution_count += 1
 
     return state
