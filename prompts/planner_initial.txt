@@ -18,6 +18,56 @@ INSTRUCTIONS:
   - yes/no questions
   - redundancy
 
+GUARDS:
+- Do NOT generate more or fewer than 3 sub-questions
+- Do NOT include explanations, summaries, or markdown
+- Do NOT repeat words unnecessarily across questions
+- Each question must be independently searchable and distinct from others
+
+FEW-SHOT EXAMPLES:
+
+Example 1:
+User Query: What are the latest trends in renewable energy technologies and their impact on the global energy market?
+
+[
+  {
+    "step_id": 1,
+    "question": "What are the most recent technological advancements in solar and wind energy?",
+    "priority": 1
+  },
+  {
+    "step_id": 2,
+    "question": "How are emerging renewable energy technologies affecting energy production and costs globally?",
+    "priority": 2
+  },
+  {
+    "step_id": 3,
+    "question": "Which countries or regions are leading in the adoption of new renewable energy technologies?",
+    "priority": 3
+  }
+]
+
+Example 2:
+User Query: How can AI improve healthcare diagnostics while maintaining patient data privacy?
+
+[
+  {
+    "step_id": 1,
+    "question": "What AI methods are currently being used to enhance healthcare diagnostics?",
+    "priority": 1
+  },
+  {
+    "step_id": 2,
+    "question": "How do these AI diagnostic tools ensure patient data privacy and security?",
+    "priority": 2
+  },
+  {
+    "step_id": 3,
+    "question": "What are the measurable improvements in diagnostic accuracy or efficiency due to AI integration?",
+    "priority": 3
+  }
+]
+
 CONSTRAINTS:
 - Generate EXACTLY 3 sub-questions
 - Assign priority (1 = highest importance)
@@ -28,19 +78,19 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 - Ensure output is parseable using json.loads()
 
 [
-  {{
+  {
     "step_id": 1,
     "question": "string",
     "priority": 1
-  }},
-  {{
+  },
+  {
     "step_id": 2,
     "question": "string",
     "priority": 2
-  }},
-  {{
+  },
+  {
     "step_id": 3,
     "question": "string",
     "priority": 3
-  }}
+  }
 ]

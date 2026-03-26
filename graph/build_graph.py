@@ -34,9 +34,9 @@ def build_graph():
         "evaluator",
         route_after_evaluator,
         {
-            "synthesiser": "synthesiser",
-            "searcher": "searcher",
-            "planner": "planner",
+            "proceed": "synthesiser",
+            "retry": "searcher",
+            "replan": "planner",
         },
     )
 
