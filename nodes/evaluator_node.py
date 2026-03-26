@@ -1,33 +1,17 @@
 from models.state import ResearchState
 from models.evaluation_models import StepEvaluation, EvaluationResult
 
-THRESHOLD = 0.5
+from services.evaluation.scoring_service import score_results
+from services.evaluation.confidence_service import compute_confidence
+
+THRESHOLD = 0.5  
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
-
-
-def score_result(result, query: str) -> float:
-    if isinstance(result, dict):
-        title = result.get("title", "")
-        snippet = result.get("snippet", "")
-    else:
-        title = getattr(result, "title", "")
-        snippet = getattr(result, "snippet", "")
-
-    text = (title + " " + snippet).lower()
-    query_terms = query.lower().split()
-
-    if not query_terms:
-        return 0.0
-
-    match_count = sum(1 for term in query_terms if term in text)
-    return match_count / len(query_terms)
 
 
 def evaluator_node(state: ResearchState) -> ResearchState:
     print("Evaluator Node")
 
-    # execution safety
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
 
@@ -40,15 +24,28 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         results = state.search_results.get(step_id, [])
 
         if not results:
-            scores = []
-            avg_score = 0.0
+            confidence = 0.0
             passed = False
+            scores = []
         else:
-            scores = [score_result(r, query) for r in results]
-            avg_score = sum(scores) / len(scores)
-            passed = avg_score >= THRESHOLD
+            # 1. scoring
+            scored_results = score_results(results, query)
 
-        print(f"[EVALUATOR DEBUG] Step {step_id} scores:", scores, "avg:", avg_score)
+            # store back
+            state.search_results[step_id] = scored_results
+
+            # extract scores
+            scores = [r.quality_score for r in scored_results]
+
+            # 2. confidence 
+            confidence = compute_confidence(scored_results)
+
+            # 3. decision based on confidence
+            passed = confidence >= THRESHOLD
+
+        print(f"[EVALUATOR DEBUG] Step {step_id} scores:", scores)
+        print(f"[EVALUATOR DEBUG] Step {step_id} confidence:", confidence)
+        print(f"[DEBUG] Step {step_id} passed: {passed}")
 
         if not passed:
             failed_steps += 1
@@ -56,7 +53,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         step_evaluations.append(
             StepEvaluation(
                 step_id=step_id,
-                confidence_score=avg_score,
+                confidence_score=confidence,
                 passed=passed
             )
         )
@@ -65,7 +62,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
     print(f"[EVALUATOR] Total steps: {total_steps}, Failed: {failed_steps}")
 
-    # decision logic (PRD aligned)
+    # Decision logic
     if total_steps == 0:
         decision = "replan"
         state.failure_reason = "No steps evaluated"
@@ -77,7 +74,8 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             state.failure_reason = "All steps failed"
         else:
             decision = "proceed"
-            state.failure_reason = "Max replans reached"
+            state.failure_reason = "All steps failed after max replans"
+            print("[WARNING] Proceeding with low confidence")
 
     elif failed_steps > 0:
         if state.search_retry_count < MAX_SEARCH_RETRIES:
