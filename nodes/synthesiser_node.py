@@ -3,6 +3,7 @@ from models.synthesis_models import SynthesisModel, Claim
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from observability.tracing import trace_node
+from utils.chunking import chunk_text
 import json
 
 @trace_node("synthesiser_node")
@@ -11,15 +12,52 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
     # Build structured context_docs
     context_docs = []
+    MAX_CHUNKS = 25
+    chunk_count = 0
+    step_map = {
+    step.step_id: step.priority
+    for step in state.research_plan
+}
 
     for step_id, results in state.search_results.items():
-        for r in results[:2]:  # top 2 per step
-            if r.snippet:
-                context_docs.append({
-                    "citation_id": r.citation_id,
-                    "content": r.snippet
-                })
 
+        priority = step_map.get(step_id, 3)
+
+    #Chunk allocation based on priority
+        if priority == 1:
+            max_chunks_per_step = 12
+        elif priority == 2:
+            max_chunks_per_step = 8
+        else:
+            max_chunks_per_step = 5
+
+        step_chunk_count = 0
+
+        for r in results:
+
+            content = r.content or r.snippet
+
+            if content:
+                chunks = chunk_text(content)
+
+                for chunk in chunks:
+
+                    if chunk_count >= MAX_CHUNKS:
+                        break
+
+                    if step_chunk_count >= max_chunks_per_step:
+                        break
+
+                    context_docs.append({
+                        "citation_id": r.citation_id,
+                        "content": chunk
+                    })
+
+                    chunk_count += 1
+                    step_chunk_count += 1
+
+            if chunk_count >= MAX_CHUNKS:
+                break
     # Handle empty
     if not context_docs:
         state.synthesis = SynthesisModel(
