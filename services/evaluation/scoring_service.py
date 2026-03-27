@@ -1,5 +1,6 @@
 from typing import List, Dict
 from models.search_models import SearchResult
+from services.evaluation.weight_service import get_dynamic_weights
 from urllib.parse import urlparse
 
 
@@ -102,7 +103,8 @@ def score_results(results: List[SearchResult], query: str) -> List[SearchResult]
     results = deduplicate_results(results)
 
     # Step 2: Validate weights
-    weights = validate_weights(DEFAULT_WEIGHTS)
+    weights = get_dynamic_weights(query)
+    weights = validate_weights(weights)
 
     # Step 3: Compute scores
     for r in results:
