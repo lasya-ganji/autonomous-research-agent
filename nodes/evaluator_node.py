@@ -105,5 +105,19 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     print(f"[EVALUATOR] Decision: {decision}")
 
     state.node_execution_count += 1
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["evaluator"] = {
+        "decision": state.evaluation.decision,
+        "steps": [
+            {
+                "step_id": step.step_id,
+                "confidence": step.confidence_score,
+                "passed": step.passed
+            }
+            for step in state.evaluation.steps
+        ]
+    }
 
     return state

@@ -72,5 +72,19 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         conflicts=response.get("conflicts", []),
         partial=response.get("partial", False)
     )
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["synthesiser"] = {
+        "num_claims": len(state.synthesis.claims),
+        "claims": [
+            {
+                "text": c.text,
+                "confidence": c.confidence,
+                "citations": c.citation_ids
+            }
+            for c in state.synthesis.claims
+        ]
+    }
 
     return state

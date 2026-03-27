@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Any
 
 from models.planner_models import PlanStep
 from models.search_models import SearchResult
@@ -56,3 +56,5 @@ class ResearchState(BaseModel):
 
     # Errors
     errors: List[ErrorLog] = Field(default_factory=list)
+
+    node_logs: Dict[str, Any] = Field(default_factory=dict)

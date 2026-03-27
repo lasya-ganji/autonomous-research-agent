@@ -39,5 +39,15 @@ def searcher_node(state: ResearchState) -> ResearchState:
     )
 
     state.node_execution_count += 1
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["searcher"] = {
+        "total_steps": len(state.research_plan),
+        "results_per_step": {
+            step_id: len(results)
+            for step_id, results in state.search_results.items()
+    }
+    }
 
     return state

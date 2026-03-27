@@ -139,5 +139,12 @@ def planner_node(state: ResearchState) -> ResearchState:
         output_data=[step.model_dump() for step in plan],
         start_time=start_time
     )
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["planner"] = {
+        "num_steps": len(state.research_plan),
+        "questions": [step.question for step in state.research_plan]
+    }
 
     return state

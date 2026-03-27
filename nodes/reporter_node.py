@@ -44,5 +44,12 @@ def reporter_node(state: ResearchState) -> ResearchState:
             "model": "llm"
         }
     )
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["reporter"] = {
+        "report_generated": True,
+        "num_sections": len(state.report.sections) if state.report else 0
+    }
 
     return state

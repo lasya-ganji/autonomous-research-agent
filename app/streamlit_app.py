@@ -1,5 +1,5 @@
 import streamlit as st
-from app.agent_runner import run_agent
+from agent_runner import run_agent
 
 # Page Config
 st.set_page_config(
@@ -16,7 +16,7 @@ st.markdown(
 # Input Section
 query = st.text_input(
     "Research Query",
-    placeholder=" "
+    placeholder="Enter your query here..."
 )
 
 run_button = st.button("Run Research")
@@ -31,36 +31,90 @@ if run_button:
     with st.spinner("Running research agent..."):
         result = run_agent(query)
 
+    
+    try:
+        result = result.dict()
+    except Exception:
+        pass
+
     st.success("Research completed successfully!")
 
-    # Final Report (MAIN OUTPUT)
-    st.subheader("Final Report")
+    # TABS UI 
 
-    report = result.get("report")
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "Report",
+        "Plan",
+        "Search",
+        "Evaluation",
+        "Synthesis",
+        "Debug"
+    ])
 
-    if report and report.sections:
-        st.markdown(report.sections[0])
-    else:
-        st.error("No report generated.")
 
-    # Evaluation (hidden by default)
-    with st.expander("Evaluation Details"):
+    # TAB 1 — REPORT
+    with tab1:
+        st.subheader("Final Report")
+
+        report = result.get("report")
+
+        if report and report.sections:
+            st.markdown(report.sections[0])
+        else:
+            st.error("No report generated.")
+
+    # TAB 2 — PLAN
+    with tab2:
+        st.subheader("Research Plan")
+
+        plan = result.get("research_plan")
+
+        if plan:
+            for step in plan:
+                st.markdown(f"**Step {step.step_id}**")
+                st.write(step.question)
+                st.caption(f"Priority: {step.priority}")
+        else:
+            st.info("No plan available.")
+
+    # TAB 3 — SEARCH
+    with tab3:
+        st.subheader("Search Results")
+
+        search_results = result.get("search_results")
+
+        if search_results:
+            for step_id, results in search_results.items():
+                with st.expander(f"Step {step_id} Results"):
+                    for r in results:
+                        st.markdown(f"**{r.title}**")
+                        st.write(r.snippet)
+                        st.caption(r.url)
+                        st.divider()
+        else:
+            st.info("No search results.")
+
+    # TAB 4 — EVALUATION
+    with tab4:
+        st.subheader("Evaluation")
+
         evaluation = result.get("evaluation")
 
         if evaluation:
-            st.write(f"Decision: `{evaluation.decision}`")
+            st.write(f"**Decision:** `{evaluation.decision}`")
 
             for step in evaluation.steps:
                 st.write({
-                    "step_id": step.step_id,
-                    "confidence": round(step.confidence_score, 3),
-                    "passed": step.passed
-                })
+                "step_id": step.step_id,
+                "confidence": round(step.confidence_score, 3),
+                "passed": step.passed
+            })
         else:
             st.info("No evaluation data available.")
 
-    # Synthesis (hidden)
-    with st.expander("Synthesised Claims"):
+    # TAB 5 — SYNTHESIS
+    with tab5:
+        st.subheader("Synthesised Claims")
+
         synthesis = result.get("synthesis")
 
         if synthesis and synthesis.claims:
@@ -71,26 +125,37 @@ if run_button:
                     f"Citations: {claim.citation_ids}"
                 )
 
-        # Show partial flag if applicable
             if synthesis.partial:
                 st.warning("Partial synthesis generated due to limited data.")
         else:
             st.info("No synthesis available.")
+            
+    # TAB 6 — DEBUG
+    with tab6:
+        st.subheader("Node Execution Details")
 
+        # Node Logs
+        node_logs = result.get("node_logs", {})
 
-    # Errors (hidden)
-    with st.expander("Errors (if any)"):
+        if node_logs:
+            for node, data in node_logs.items():
+                with st.expander(f"{node.upper()} NODE"):
+                    st.json(data)
+        else:
+            st.info("No node logs available.")
+
+        st.divider()
+
+        # Errors
+        st.subheader("Errors (if any)")
+
         errors = result.get("errors")
 
         if errors:
             for err in errors:
                 try:
-                    st.error(
-                        f"[{err.severity}] {err.node} → {err.message}"
-                    )
+                    st.error(f"[{err.severity}] {err.node} → {err.message}")
                 except Exception:
-                # fallback if error is still dict (safety)
                     st.error(str(err))
         else:
             st.success("No errors encountered.")
-
