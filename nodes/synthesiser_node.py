@@ -38,7 +38,14 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             content = r.content or r.snippet
 
             if content:
-                chunks = chunk_text(content)
+
+                #If it's a snippet → don't chunk
+                if getattr(r, "snippet", False):
+                    chunks = [content]
+
+                #If it's full content → chunk it
+                else:
+                    chunks = chunk_text(content)
 
                 for chunk in chunks:
 

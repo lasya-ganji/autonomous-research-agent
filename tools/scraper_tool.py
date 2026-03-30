@@ -41,8 +41,8 @@ def scrape_url(url: str) -> str:
 
 # Clean text function
 def clean_text(text: str) -> str:
-    text = " ".join(text.split())  # remove extra spaces
-    return text[:2000]  # limit size for LLM
+    return " ".join(text.split())  # remove extra spaces
+      # limit size for LLM
 
 
 # BeautifulSoup fallback
