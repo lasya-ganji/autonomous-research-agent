@@ -7,7 +7,7 @@ from services.evaluation.confidence_service import compute_confidence
 from observability.tracing import trace_node
 
 THRESHOLD = 0.5  
-MAX_SEARCH_RETRIES = 1
+MAX_SEARCH_RETRIES = 1 
 MAX_REPLANS = 1
 
 

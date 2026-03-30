@@ -43,17 +43,42 @@ INSTRUCTIONS:
 - Highlight differences clearly
 - Avoid repetition
 
-6. Use of Synthesis (STRICT)
-- Use ONLY the provided synthesis
-- Do NOT add external knowledge
-- Do NOT infer beyond given claims
-- If information is insufficient, state it clearly
+6. Use of Synthesis (STRICT — STRUCTURED)
 
-7. Citations (STRICT)
+The synthesis is provided as structured JSON.
+
+Each item contains:
+- "text": the claim
+- "citations": list of citation numbers
+
+You MUST:
+- Convert EACH item into a sentence in the report
+- Include its citations inline in the SAME sentence
+
+Example:
+
+Input:
+{{"text": "LangGraph is a library", "citations": ["1","2"]}}
+
+Output:
+LangGraph is a library [1,2].
+
+Rules:
+- Do NOT drop citations
+- Do NOT move citations to another section
+- Do NOT combine multiple claims incorrectly
+- Do NOT rewrite meaning
+
+
+7. Citations (STRICT — INLINE ONLY)
+
 - Use inline citations like [1], [2]
-- Only cite from provided citations
-- Do NOT fabricate or invent citations
-- Each major claim should have at least one citation
+- Citations must appear ONLY within sentences
+- Do NOT create a separate "Citations" section
+- Do NOT list citations at the end
+
+- Preserve citation numbers exactly
+- Do NOT invent new citations
 
 8. Consistency Rules
 - Do NOT contradict the synthesis
@@ -74,8 +99,6 @@ GUARDRAILS (MANDATORY):
 If synthesis is partial or limited:
 - Acknowledge gaps briefly
 - Still produce best possible structured report
-
---------------------------------------------------
 
 OUTPUT:
 
