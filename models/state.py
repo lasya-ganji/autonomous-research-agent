@@ -32,6 +32,7 @@ class ResearchState(BaseModel):
     # Evaluation
     evaluation: EvaluationResult | None = None
     failure_reason: str = ""
+    overall_confidence: float = 0.0  
 
     # Retry / Replan control
     search_retry_count: int = Field(default=0, ge=0)
@@ -57,4 +58,5 @@ class ResearchState(BaseModel):
     # Errors
     errors: List[ErrorLog] = Field(default_factory=list)
 
+    # Observability / Debugging
     node_logs: Dict[str, Any] = Field(default_factory=dict)

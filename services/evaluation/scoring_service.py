@@ -2,6 +2,7 @@ from typing import List, Dict
 from models.search_models import SearchResult
 from services.evaluation.weight_service import get_dynamic_weights
 from urllib.parse import urlparse
+import re
 
 
 # DEFAULT WEIGHTS (fallback)
@@ -12,7 +13,8 @@ DEFAULT_WEIGHTS = {
     "depth": 0.1
 }
 
-# DEDUPLICATION (Stage 1)
+
+# DEDUPLICATION
 
 def deduplicate_results(results: List[SearchResult]) -> List[SearchResult]:
     seen_urls = set()
@@ -29,17 +31,23 @@ def deduplicate_results(results: List[SearchResult]) -> List[SearchResult]:
 # VALIDATION LAYER
 
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
+    required = {"relevance", "recency", "domain", "depth"}
+
+    if not weights or not all(k in weights for k in required):
+        return DEFAULT_WEIGHTS
 
     total = sum(weights.values()) or 1
     weights = {k: v / total for k, v in weights.items()}
 
-    # Minimum thresholds (anchoring)
+    # minimum thresholds
     weights["relevance"] = max(weights["relevance"], 0.35)
     weights["recency"] = max(weights["recency"], 0.15)
     weights["domain"] = max(weights["domain"], 0.15)
     weights["depth"] = max(weights["depth"], 0.05)
 
-    # Renormalize again
+    # max cap
+    weights = {k: min(v, 0.6) for k, v in weights.items()}
+
     total = sum(weights.values()) or 1
     weights = {k: v / total for k, v in weights.items()}
 
@@ -53,80 +61,155 @@ def compute_relevance(result: SearchResult, query: str) -> float:
     title_words = set((result.title or "").lower().split())
     snippet_words = set((result.snippet or "").lower().split())
 
-    denominator = len(query_words) or 1
+    denom = len(query_words) or 1
 
-    title_overlap = len(query_words & title_words) / denominator
-    snippet_overlap = len(query_words & snippet_words) / denominator
+    title_overlap = len(query_words & title_words) / denom
+    snippet_overlap = len(query_words & snippet_words) / denom
 
-    score = 0.6 * title_overlap + 0.4 * snippet_overlap
+    base = 0.6 * title_overlap + 0.4 * snippet_overlap
 
-    return min(score, 1.0)
+    # adjustment for agreement/conflict
+    if title_overlap > 0.6 and snippet_overlap > 0.6:
+        base += 0.05
+    elif title_overlap > 0.6 and snippet_overlap < 0.2:
+        base -= 0.05
+
+    return max(0.0, min(base, 1.0))
 
 
+# improved domain scoring with tiered logic
 def compute_domain(result: SearchResult) -> float:
     try:
         domain = urlparse(str(result.url)).netloc.lower()
 
-        if "gov" in domain or "edu" in domain or "nih" in domain:
-            return 0.9
-        elif "org" in domain:
+        # high authority (research / official)
+        if any(x in domain for x in ["gov", "edu", "nih", "who", "ieee", "acm"]):
+            return 0.95
+
+        # trusted orgs / documentation
+        if any(x in domain for x in ["org", "docs", "developer", "openai", "aws", "google"]):
+            return 0.85
+
+        # well-known knowledge platforms
+        if any(x in domain for x in ["wikipedia", "britannica"]):
             return 0.8
-        else:
-            return 0.6
+
+        # medium authority (blogs / tech sites)
+        if any(x in domain for x in ["medium", "substack", "blog"]):
+            return 0.65
+
+        # low authority (forums / user-generated)
+        if any(x in domain for x in ["reddit", "quora", "stackexchange"]):
+            return 0.55
+
+        # fallback
+        return 0.7
 
     except Exception:
         return 0.5
 
 
 def compute_recency(result: SearchResult) -> float:
-    # Placeholder (PRD full logic later)
-    return 0.5
+    text = (result.snippet or "") + " " + (result.title or "")
+    years = re.findall(r"(20\d{2})", text)
 
+    if not years:
+        return 0.5
 
-def compute_depth(result: SearchResult) -> float:
-    length = len(result.snippet or "")
+    latest_year = max(map(int, years))
 
-    if length > 300:
+    if latest_year >= 2024:
         return 0.9
-    elif length > 150:
+    elif latest_year >= 2022:
         return 0.7
     else:
         return 0.5
 
+
+# improved depth scoring using content signals
+def compute_depth(result: SearchResult) -> float:
+    text = result.snippet or ""
+    length = len(text)
+
+    # base on length
+    if length > 400:
+        base = 0.9
+    elif length > 200:
+        base = 0.7
+    elif length > 100:
+        base = 0.5
+    else:
+        base = 0.3
+
+    # boost if numbers/data present
+    if re.search(r"\d+", text):
+        base += 0.05
+
+    # boost if structured (lists / punctuation)
+    if any(x in text for x in ["-", "•", ":", ";"]):
+        base += 0.05
+
+    return min(base, 1.0)
+
+
+# recency hard constraint
+def is_outdated(result: SearchResult, recency_weight: float) -> bool:
+    if recency_weight < 0.3:
+        return False
+
+    text = (result.snippet or "") + " " + (result.title or "")
+    years = re.findall(r"(20\d{2})", text)
+
+    if not years:
+        return False
+
+    latest = max(map(int, years))
+    return latest < 2022
 
 
 # MAIN SCORING FUNCTION
 
 def score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
 
-    # Step 1: Deduplicate
+    # deduplicate
     results = deduplicate_results(results)
 
-    # Step 2: Validate weights
+    # get weights
     weights = get_dynamic_weights(query)
     weights = validate_weights(weights)
 
-    # Step 3: Compute scores
+    scored = []
+
     for r in results:
+
+        # hard recency filter
+        if is_outdated(r, weights["recency"]):
+            continue
+
+        # compute signals
         r.relevance_score = compute_relevance(r, query)
         r.domain_score = compute_domain(r)
         r.recency_score = compute_recency(r)
         r.depth_score = compute_depth(r)
 
-        final_score = (
+        # final score
+        r.quality_score = (
             weights["relevance"] * r.relevance_score +
             weights["domain"] * r.domain_score +
             weights["recency"] * r.recency_score +
             weights["depth"] * r.depth_score
         )
 
-        r.quality_score = final_score
+        scored.append(r)
 
-    # Step 4: Sort
-    results.sort(key=lambda x: x.quality_score, reverse=True)
+    # sort by quality
+    scored.sort(key=lambda x: x.quality_score, reverse=True)
 
-    # Step 5: Assign rank
-    for i, r in enumerate(results):
+    # remove very low quality
+    scored = [r for r in scored if r.quality_score > 0.3]
+
+    # assign rank
+    for i, r in enumerate(scored):
         r.rank = i + 1
 
-    return results
+    return scored
