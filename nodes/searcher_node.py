@@ -1,20 +1,24 @@
 from models.state import ResearchState
+from models.search_models import SearchResult
+
 from tools.search_tool import search_tool
 from tools.scraper_tool import scrape_url
+
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
+
 import time
+import uuid
+
 
 @trace_node("searcher_node")
 def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
+
     start_time = time.time()
 
-    # execution safety
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
-
-    print(f"[DEBUG] Total steps in plan: {len(state.research_plan)}")
 
     state.search_results = {}
 
@@ -27,34 +31,71 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             print(f"[SEARCHER NODE] Step {step_id}: {query}")
 
-            results = search_tool(query)
+            raw_results = search_tool(query)
 
-            if results:
-                for i, r in enumerate(results):
-                    if not r.url:
+            structured_results = []
+            seen_urls = set()
+
+            # scraping limits per priority
+            scrape_limits = {
+                1: 3,
+                2: 2,
+                3: 1
+            }
+
+            max_scrapes = scrape_limits.get(step.priority, 1)
+
+            if raw_results:
+                for i, r in enumerate(raw_results):
+
+                    url = getattr(r, "url", None)
+                    title = getattr(r, "title", "Untitled")
+                    snippet = getattr(r, "snippet", "")
+
+                    if not url or url in seen_urls:
                         continue
 
-                        # Priority-based scraping
-                    if step.priority == 1 and i < 3:
-                        content = scrape_url(r.url)
+                    seen_urls.add(url)
 
-                    elif step.priority == 2 and i < 2:
-                        content = scrape_url(r.url)
+                    # Generate unique citation_id
+                    citation_id = str(uuid.uuid4())
 
-                    elif step.priority == 3 and i < 1:
-                        content = scrape_url(r.url)
+                    # Safe scraping
+                    content = None
+                    if i < max_scrapes:
+                        try:
+                            content = scrape_url(url)
+                        except Exception as e:
+                            print(f"[SCRAPER ERROR] {url}: {e}")
 
-                    else:
-                        content = None
+                    # fallback if snippet empty
+                    if not snippet:
+                        snippet = title
 
-                    if content:
-                        r.content = content  
+                    result = SearchResult(
+                        citation_id=citation_id,
+                        url=url,
+                        title=title,
+                        snippet=snippet,
+                        content=content,
 
-            state.search_results[step_id] = results if results else []
+                        # placeholders (will be overwritten)
+                        quality_score=0.5,
+                        relevance_score=0.5,
+                        recency_score=0.5,
+                        domain_score=0.5,
+                        depth_score=0.5,
+                        rank=1
+                    )
+
+                    structured_results.append(result)
+
+            state.search_results[step_id] = structured_results
 
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
 
+    # Logger
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
@@ -62,7 +103,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
         start_time=start_time
     )
 
-    state.node_execution_count += 1
+    # Structured logs
     if state.node_logs is None:
         state.node_logs = {}
 
@@ -71,9 +112,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
         "results_per_step": {
             step_id: len(results)
             for step_id, results in state.search_results.items()
-    },
-    "scraping": "enabled",
-    "top_k_scraped": 2
+        },
+        "scraping": "enabled",
+        "top_k_scraped": 3
     }
+
+    state.node_execution_count += 1
 
     return state

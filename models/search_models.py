@@ -8,10 +8,10 @@ class SearchResult(BaseModel):
     snippet: str
     content: Optional[str] = None
 
-    quality_score: float = Field(ge=0, le=1)
-    relevance_score: float = Field(ge=0, le=1)
-    recency_score: float = Field(ge=0, le=1)
-    domain_score: float = Field(ge=0, le=1)
-    depth_score: float = Field(ge=0, le=1)
+    quality_score: Optional[float] = None
+    relevance_score: Optional[float] = None
+    recency_score: Optional[float] = None
+    domain_score: Optional[float] = None
+    depth_score: Optional[float] = None
 
-    rank: int = Field(ge=1)
+    rank: Optional[int] = None
