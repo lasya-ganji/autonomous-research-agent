@@ -41,12 +41,13 @@ if run_button:
 
     # TABS UI 
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Report",
         "Plan",
         "Search",
         "Evaluation",
         "Synthesis",
+        "Citations", 
         "Debug"
     ])
 
@@ -129,9 +130,50 @@ if run_button:
                 st.warning("Partial synthesis generated due to limited data.")
         else:
             st.info("No synthesis available.")
-            
-    # TAB 6 — DEBUG
+
+    # TAB 6 — CITATIONS
     with tab6:
+        st.subheader("Citations")
+
+        report = result.get("report")
+        all_citations = result.get("citations")
+
+        if report and report.citations and all_citations:
+
+            used_ids = set(report.citations)
+
+            # 🔥 Filter only used citations
+            filtered_citations = [
+                c for cid, c in all_citations.items()
+                if cid in used_ids and c.status == "valid"
+            ]
+
+            for i, c in enumerate(filtered_citations):
+
+                # Status color
+                if c.status == "valid":
+                    status_color = "🟢"
+                elif c.status == "stale":
+                    status_color = "🟡"
+                else:
+                    status_color = "🔴"
+
+                # 🔥 Show index number matching [1], [2]
+                st.markdown(f"### [{i+1}] {status_color} {c.title}")
+
+                st.write(f"**Citation ID:** {c.citation_id}")
+                st.write(f"**URL:** {c.url}")
+                st.write(f"**Quality Score:** {round(c.quality_score, 2)}")
+                st.write(f"**Status:** `{c.status}`")
+                st.caption(f"Accessed: {c.date_accessed}")
+
+                st.divider()
+
+        else:
+            st.info("No citations available.")
+
+    # TAB 7 — DEBUG
+    with tab7:
         st.subheader("Node Execution Details")
 
         # Node Logs
