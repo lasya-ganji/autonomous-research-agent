@@ -1,43 +1,81 @@
-import requests
 from datetime import datetime
+import requests
+import time
+
 from models.state import ResearchState
-from models.citation_models import CitationModel
+from models.citation_models import Citation
 from models.enums import CitationStatus
+
 from observability.tracing import trace_node
+from utils.logger import log_node_execution
 
 
-
-@trace_node("citation_node")
-def citation_node(state: ResearchState) -> ResearchState:
+@trace_node("citation_manager_node")
+def citation_manager_node(state: ResearchState) -> ResearchState:
     """
-    Collects, validates, and stores citations in the agent state.
+    Collect, validate, deduplicate, and store citations from search results.
     """
 
-    print("Citation Node")
+    print("Citation Manager Node")
 
-    # Step 1: Extract raw citations from search results
-    raw_citations = getattr(state, "search_results", [])  # List of dicts with 'title', 'url', 'quality_score'
+    # Logger: start
+    start_time = time.time()
 
-    for rc in raw_citations:
-        citation_id = rc.get("id") or str(hash(rc.get("url")))
-        title = rc.get("title", "Untitled")
-        url = rc.get("url", "")
-        quality_score = rc.get("quality_score", 0.5)
+    input_data = {
+        "num_steps": len(state.search_results),
+        "existing_citations": len(state.citations)
+    }
 
-        # Step 2: Validate the URL (simple HEAD request)
+    # Step 1: Flatten results
+    all_results = []
+    for results in state.search_results.values():
+        all_results.extend(results)
+
+    if not all_results:
+        state.node_logs["citation"] = {"num_citations": 0}
+
+        log_node_execution(
+            "citation",
+            input_data,
+            {"num_citations": 0},
+            start_time
+        )
+        return state
+
+    # Step 2: Deduplicate by URL
+    seen_urls = set()
+
+    for r in all_results:
+        url = getattr(r, "url", "")
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+
+        citation_id = getattr(r, "citation_id", None) or str(hash(url))
+        title = getattr(r, "title", "Untitled")
+        quality_score = getattr(r, "quality_score", 0.5)
+
+
+        # Step 3: URL validation (lightweight)
+
         try:
-            resp = requests.head(url, timeout=5, allow_redirects=True)
+            resp = requests.head(url, timeout=3, allow_redirects=True)
+
             if resp.status_code == 200:
                 status = CitationStatus.valid
-            elif resp.status_code in [301, 302]:
+            elif resp.status_code in (301, 302):
                 status = CitationStatus.stale
             else:
                 status = CitationStatus.broken
+
         except requests.RequestException:
             status = CitationStatus.broken
 
-        # Step 3: Store in ResearchState.citations
-        state.citations[citation_id] = CitationModel(
+
+        # Step 4: Store citation
+
+        state.citations[citation_id] = Citation(
             citation_id=citation_id,
             title=title,
             url=url,
@@ -46,12 +84,26 @@ def citation_node(state: ResearchState) -> ResearchState:
             date_accessed=datetime.now().isoformat()
         )
 
-    # Step 4: Logging
+    # Step 5: Structured logs (UI/debug)
+    num_valid = sum(1 for c in state.citations.values() if c.status == CitationStatus.valid)
+    num_broken = sum(1 for c in state.citations.values() if c.status == CitationStatus.broken)
+    num_stale = sum(1 for c in state.citations.values() if c.status == CitationStatus.stale)
+
     state.node_logs["citation"] = {
-        "num_citations_collected": len(raw_citations),
-        "num_valid": sum(1 for c in state.citations.values() if c.status == CitationStatus.valid),
-        "num_broken": sum(1 for c in state.citations.values() if c.status == CitationStatus.broken),
-        "num_stale": sum(1 for c in state.citations.values() if c.status == CitationStatus.stale),
+        "num_citations": len(state.citations),
+        "num_valid": num_valid,
+        "num_broken": num_broken,
+        "num_stale": num_stale
     }
+
+    # Step 6: Logger (system)
+    output_data = {
+        "num_citations": len(state.citations),
+        "valid": num_valid,
+        "broken": num_broken,
+        "stale": num_stale
+    }
+
+    log_node_execution("citation", input_data, output_data, start_time)
 
     return state
