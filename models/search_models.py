@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, HttpUrl
 from typing import Optional
 
 class SearchResult(BaseModel):
