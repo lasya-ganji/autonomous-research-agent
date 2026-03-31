@@ -1,24 +1,19 @@
-from datetime import datetime
-import requests
-import time
-
 from models.state import ResearchState
-from models.citation_models import Citation
 from models.enums import CitationStatus
+
+from services.citation.citation_service import build_citation
 
 from observability.tracing import trace_node
 from utils.logger import log_node_execution
 
+import time
+
 
 @trace_node("citation_manager_node")
 def citation_manager_node(state: ResearchState) -> ResearchState:
-    """
-    Collect, validate, deduplicate, and store citations from search results.
-    """
 
     print("Citation Manager Node")
 
-    # Logger: start
     start_time = time.time()
 
     input_data = {
@@ -26,65 +21,41 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         "existing_citations": len(state.citations)
     }
 
-    # Step 1: Flatten results
-    all_results = []
+    seen_ids = set()
+
+    # COLLECT FROM SEARCH RESULTS
+    
     for results in state.search_results.values():
-        all_results.extend(results)
+        for r in results:
 
-    if not all_results:
-        state.node_logs["citation"] = {"num_citations": 0}
+            citation_id = getattr(r, "citation_id", None)
 
-        log_node_execution(
-            "citation",
-            input_data,
-            {"num_citations": 0},
-            start_time
-        )
-        return state
+            if not citation_id:
+                continue  # 🚨 skip if searcher didn't assign
 
-    # Step 2: Deduplicate by URL
-    seen_urls = set()
+            if citation_id in seen_ids:
+                continue
 
-    for r in all_results:
-        url = getattr(r, "url", "")
-        if not url or url in seen_urls:
-            continue
+            seen_ids.add(citation_id)
 
-        seen_urls.add(url)
+            # build + validate
+            citation = build_citation(r, citation_id)
 
-        citation_id = getattr(r, "citation_id", None) or str(hash(url))
-        title = getattr(r, "title", "Untitled")
-        quality_score = getattr(r, "quality_score", 0.5)  
+            state.citations[citation_id] = citation
 
+    # VALIDATION AGAINST SYNTHESIS
 
-        # Step 3: URL validation (lightweight)
+    broken_ids = set()
 
-        try:
-            resp = requests.head(url, timeout=3, allow_redirects=True)
+    if state.synthesis:
+        for claim in state.synthesis.claims:
+            for cid in claim.citations:
 
-            if resp.status_code == 200:
-                status = CitationStatus.valid
-            elif resp.status_code in (301, 302):
-                status = CitationStatus.stale
-            else:
-                status = CitationStatus.broken
+                if cid not in state.citations:
+                    broken_ids.add(cid)
 
-        except requests.RequestException:
-            status = CitationStatus.broken
+    # LOGGING
 
-
-        # Step 4: Store citation
-
-        state.citations[citation_id] = Citation(
-            citation_id=citation_id,
-            title=title,
-            url=url,
-            quality_score=quality_score,
-            status=status,
-            date_accessed=datetime.now().isoformat()
-        )
-
-    # Step 5: Structured logs (UI/debug)
     num_valid = sum(1 for c in state.citations.values() if c.status == CitationStatus.valid)
     num_broken = sum(1 for c in state.citations.values() if c.status == CitationStatus.broken)
     num_stale = sum(1 for c in state.citations.values() if c.status == CitationStatus.stale)
@@ -93,15 +64,16 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         "num_citations": len(state.citations),
         "num_valid": num_valid,
         "num_broken": num_broken,
-        "num_stale": num_stale
+        "num_stale": num_stale,
+        "missing_from_synthesis": list(broken_ids)
     }
 
-    # Step 6: Logger (system)
     output_data = {
         "num_citations": len(state.citations),
         "valid": num_valid,
         "broken": num_broken,
-        "stale": num_stale
+        "stale": num_stale,
+        "missing": len(broken_ids)
     }
 
     log_node_execution("citation", input_data, output_data, start_time)
