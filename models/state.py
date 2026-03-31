@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Set, Any
+from typing import List, Dict, Set, Any, Optional
 
 from models.planner_models import PlanStep
 from models.search_models import SearchResult
@@ -12,51 +12,54 @@ from models.cache_models import CacheModel
 
 
 class ResearchState(BaseModel):
-    # Input
+    # INPUT
     query: str
 
-    # Planner
+    # PLANNER
     research_plan: List[PlanStep] = Field(default_factory=list)
 
-    # Search
+    # SEARCH
     search_results: Dict[int, List[SearchResult]] = Field(default_factory=dict)
     failed_queries: List[str] = Field(default_factory=list)
 
-    # Deduplication
+    # DEDUPLICATION
     deduplicated_urls: Set[str] = Field(default_factory=set)
 
-    # Context building
+    # CONTEXT BUILDING
     context_docs: List[str] = Field(default_factory=list)
     doc_summaries: Dict[str, str] = Field(default_factory=dict)
 
-    # Evaluation
-    evaluation: EvaluationResult | None = None
+    # EVALUATION
+    evaluation: Optional[EvaluationResult] = None
     failure_reason: str = ""
     overall_confidence: float = 0.0  
 
-    # Retry / Replan control
+    # RETRY / REPLAN
     search_retry_count: int = Field(default=0, ge=0)
     replan_count: int = Field(default=0, ge=0)
 
-    # Execution tracking
+    # EXECUTION TRACKING
     unresolved_steps: List[int] = Field(default_factory=list)
     node_execution_count: int = Field(default=0, ge=0, le=12)
 
-    # Output
-    synthesis: SynthesisModel | None = None
-    report: ReportModel | None = None
+    # OUTPUT
+    synthesis: Optional[SynthesisModel] = None
+    report: Optional[ReportModel] = None
 
-    # Citations
+    # CITATIONS (SOURCE OF TRUTH)
     citations: Dict[str, Citation] = Field(default_factory=dict)
 
-    # Budget / caching
+    # Track which citations are used in synthesis/report
+    used_citation_ids: Set[str] = Field(default_factory=set)
+
+    # BUDGET / CACHING
     token_usage: int = Field(default=0, ge=0)
     budget_remaining: int = Field(default=0, ge=0)
     cache_hit: bool = False
     caches: List[CacheModel] = Field(default_factory=list)
 
-    # Errors
+    # ERRORS
     errors: List[ErrorLog] = Field(default_factory=list)
 
-    # Observability / Debugging
+    # DEBUG / OBSERVABILITY
     node_logs: Dict[str, Any] = Field(default_factory=dict)
