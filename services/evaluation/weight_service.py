@@ -11,34 +11,44 @@ DEFAULT_WEIGHTS = {
     "depth": 0.1
 }
 
-
 REQUIRED_KEYS = {"relevance", "recency", "domain", "depth"}
 
 
+# VALIDATION HELPERS
+
+def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
+    total = sum(weights.values()) or 1
+    return {k: v / total for k, v in weights.items()}
+
+
+def _apply_constraints(weights: Dict[str, float]) -> Dict[str, float]:
+    # minimum thresholds 
+    weights["relevance"] = max(weights["relevance"], 0.35)
+    weights["recency"] = max(weights["recency"], 0.15)
+    weights["domain"] = max(weights["domain"], 0.15)
+    weights["depth"] = max(weights["depth"], 0.05)
+
+    # max cap (dominance control)
+    weights = {k: min(v, 0.6) for k, v in weights.items()}
+
+    # normalize again
+    return _normalize(weights)
+
+
 def _is_valid(weights: Dict[str, float]) -> bool:
-    # check keys
-    if not all(k in weights for k in REQUIRED_KEYS):
+    if not weights or not all(k in weights for k in REQUIRED_KEYS):
         return False
 
-    # check range
     for v in weights.values():
         if not isinstance(v, (int, float)):
             return False
         if v < 0 or v > 1:
             return False
 
-    # check sum ≈ 1
-    total = sum(weights.values())
-    if not (0.95 <= total <= 1.05):
-        return False
-
     return True
 
 
-def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
-    total = sum(weights.values()) or 1
-    return {k: v / total for k, v in weights.items()}
-
+# MAIN FUNCTION
 
 def get_dynamic_weights(query: str) -> Dict[str, float]:
     prompt_template = load_prompt("evaluator_weights.txt")
@@ -47,18 +57,24 @@ def get_dynamic_weights(query: str) -> Dict[str, float]:
     try:
         response = call_llm(prompt)
 
-        data = json.loads(response)
+        # safe JSON parsing
+        try:
+            data = json.loads(response)
+        except Exception:
+            return DEFAULT_WEIGHTS
 
         weights = {
-            k: float(data[k])
+            k: float(data.get(k, 0))
             for k in REQUIRED_KEYS
-            if k in data
         }
 
         if not _is_valid(weights):
             return DEFAULT_WEIGHTS
 
+        # normalize
         weights = _normalize(weights)
+
+        weights = _apply_constraints(weights)
 
         return weights
 

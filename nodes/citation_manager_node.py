@@ -54,7 +54,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
 
         citation_id = getattr(r, "citation_id", None) or str(hash(url))
         title = getattr(r, "title", "Untitled")
-        quality_score = getattr(r, "quality_score", 0.5)
+        quality_score = getattr(r, "quality_score", 0.5)  
 
 
         # Step 3: URL validation (lightweight)

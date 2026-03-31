@@ -28,7 +28,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
     MAX_CHUNK_SIZE = 1000
     MAX_CONTEXT_CHARS = 15000
     RESULTS_PER_STEP = 2
-    MAX_CHUNKS_PER_SOURCE = 2   # critical fix
+    MAX_CHUNKS_PER_SOURCE = 2   
 
     # Step 1: Select top results per step
     selected_results = []
