@@ -11,8 +11,8 @@ import time
 
 # CONFIG 
 
-THRESHOLD = 0.6
-LOW_CONF_THRESHOLD = 0.4
+THRESHOLD = 0.4
+LOW_CONF_THRESHOLD = 0.3
 
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
@@ -146,6 +146,14 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     )
 
     state.overall_confidence = avg_confidence
+    
+    # PROPAGATE SCORES TO CITATIONS
+    for results in state.search_results.values():
+        for r in results:
+            cid = getattr(r, "citation_id", None)
+
+            if cid and cid in state.citations:
+                state.citations[cid].quality_score = round(r.quality_score, 3)
 
     # DEBUG LOGS (UI)
 

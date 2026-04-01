@@ -1,61 +1,135 @@
-You are a scoring weight generator for a research agent.
+You are an expert scoring weight generator for a research agent.
 
-Your task is to assign weights for ranking search results based on the query.
+Your task is to assign importance weights to ranking signals for a given query.
+
+---
+
+INPUT
 
 Query:
 {query}
 
+---
 
-SIGNALS:
+SCORING SIGNALS
 
-- relevance: how directly content answers the query
-- recency: importance of up-to-date information
-- domain: credibility of source (research/official > blogs > unknown)
-- depth: level of detail and completeness
+Each signal is normalized between 0 and 1:
 
+* relevance → how directly the content answers the query
+* recency → importance of up-to-date information
+* domain → credibility and authority of the source
+* depth → level of detail, completeness, and richness
 
-GOAL:
+---
 
-Return weights that reflect what matters MOST for this specific query.
+OBJECTIVE
 
+Generate weights that reflect what matters MOST for this query.
 
-GUIDELINES:
+These weights will be used to rank search results.
 
-- If query is time-sensitive (latest, recent, trends) → increase recency
-- If query is technical or research-heavy → increase domain and depth
-- If query is comparison or factual → increase relevance
-- If query needs deep explanation → increase depth
+---
 
+QUERY UNDERSTANDING (CRITICAL)
 
-IMPORTANT RULES:
+Analyze the query intent:
 
-- relevance should usually be highest, but NOT always fixed
-- weights MUST vary depending on the query
-- DO NOT return fixed or repeated patterns
-- DO NOT copy previous outputs
-- Ensure meaningful differences across signals
+1. Time-sensitive queries (latest, trends, recent, dates)
+   → Increase recency
 
+2. Technical / research queries
+   → Increase domain and depth
 
-CONSTRAINTS:
+3. Factual / comparison queries
+   → Increase relevance
 
-- all weights must be between 0.1 and 0.6
-- sum must equal EXACTLY 1.0
-- all four keys must be present
+4. Explanatory queries
+   → Increase depth
 
+5. Ambiguous queries
+   → Keep balanced distribution with relevance slightly dominant
 
-VALIDATION:
+---
 
-Before returning:
-- ensure weights are not identical to common defaults
-- ensure distribution reflects query intent
+HARD CONSTRAINTS (MANDATORY)
 
+You MUST strictly follow ALL constraints:
 
-OUTPUT STRUCTURE(STRICT JSON ONLY):
+1. VALUE RANGE:
+
+   * Each weight must be between 0.1 and 0.6
+
+2. SUM CONSTRAINT:
+
+   * Sum of all weights MUST equal EXACTLY 1.0
+
+3. MINIMUM THRESHOLDS (SIGNAL ANCHORING):
+
+   * relevance ≥ 0.35
+   * recency ≥ 0.15
+   * domain ≥ 0.15
+   * depth ≥ 0.05
+
+4. MAXIMUM THRESHOLD (DOMINANCE CONTROL):
+
+   * No weight may exceed 0.60
+
+5. RELEVANCE PRIORITY:
+
+   * relevance must NOT be the lowest signal
+   * relevance should generally be highest unless strongly justified
+
+---
+
+DISTRIBUTION RULES
+
+* At least TWO signals must differ by ≥ 0.05
+* Avoid flat or uniform distributions
+* Adjust weights proportionally when increasing one signal
+* If one signal increases, others must decrease accordingly
+
+---
+
+ANTI-PATTERNS (STRICTLY FORBIDDEN)
+
+* DO NOT output equal weights (e.g., 0.25 each)
+* DO NOT repeat common defaults (0.5, 0.2, 0.2, 0.1)
+* DO NOT violate minimum thresholds
+* DO NOT exceed maximum threshold
+* DO NOT ignore query intent
+* DO NOT produce random or unbalanced weights
+
+---
+
+SELF-VALIDATION STEP (MANDATORY BEFORE OUTPUT)
+
+Before returning the result, you MUST verify:
+
+* All weights satisfy min thresholds
+* No weight exceeds 0.60
+* Sum = EXACTLY 1.0
+* Distribution reflects query intent
+* No trivial or repeated pattern
+
+If any condition fails → REVISE weights before output.
+
+---
+
+REASON FIELD
+
+Provide a ONE-WORD reason indicating dominant intent:
+
+Examples:
+"timeliness", "technical", "comparison", "depth", "balanced"
+
+---
+
+OUTPUT FORMAT (STRICT JSON ONLY)
 
 {
-  "relevance": 0.0,
-  "recency": 0.0,
-  "domain": 0.0,
-  "depth": 0.0,
-  "reason": "short ONE word explanation of why weights were chosen"
+"relevance": 0.0,
+"recency": 0.0,
+"domain": 0.0,
+"depth": 0.0,
+"reason": "one-word"
 }

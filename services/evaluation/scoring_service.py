@@ -102,17 +102,32 @@ def compute_domain(result: SearchResult) -> float:
 
 def compute_recency(result: SearchResult, weight: float) -> float:
 
-    text = f"{result.title or ''} {result.snippet or ''}"
-    years = re.findall(r"(20\d{2})", text)
+    current_year = datetime.now().year
 
-    if not years:
+    # 1. PRIMARY: USE METADATA
+    if getattr(result, "publish_date", None):
+        try:
+            year = int(str(result.publish_date)[:4])
+            gap = current_year - year
+        except:
+            gap = None
+    else:
+        gap = None
+
+    # 2. FALLBACK: REGEX (TEXT)
+    if gap is None:
+        text = f"{result.title or ''} {result.snippet or ''}"
+        years = re.findall(r"(20\d{2})", text)
+
+        if years:
+            latest = max(map(int, years))
+            gap = current_year - latest
+
+    # 3. DEFAULT (NO INFO)
+    if gap is None:
         return 0.5
 
-    latest = max(map(int, years))
-    current = datetime.now().year
-
-    gap = current - latest
-
+    # 4. SCORING
     if gap <= 1:
         return 1.0
     elif gap <= 2:
@@ -148,15 +163,25 @@ def is_outdated(result: SearchResult, recency_weight: float) -> bool:
     if recency_weight < 0.30:
         return False
 
+    current_year = datetime.now().year
+
+    # 1. Try metadata
+    if getattr(result, "publish_date", None):
+        try:
+            year = int(str(result.publish_date)[:4])
+            return (current_year - year) > 3
+        except:
+            pass
+
+    # 2. Fallback regex
     text = f"{result.title or ''} {result.snippet or ''}"
     years = re.findall(r"(20\d{2})", text)
 
-    if not years:
-        return False
+    if years:
+        latest = max(map(int, years))
+        return (current_year - latest) > 3
 
-    latest = max(map(int, years))
-    return (datetime.now().year - latest) > 3
-
+    return False
 
 # MAIN
 
