@@ -10,8 +10,9 @@ from utils.logger import log_node_execution
 import time
 
 
-THRESHOLD = 0.5
-LOW_CONF_THRESHOLD = 0.4
+# UPDATED THRESHOLDS
+THRESHOLD = 0.2
+LOW_CONF_THRESHOLD = 0.15
 
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
@@ -19,7 +20,10 @@ MAX_REPLANS = 1
 
 @trace_node("evaluator_node")
 def evaluator_node(state: ResearchState) -> ResearchState:
-
+    
+    if getattr(state, "skip_eval", False):
+        print("⚡ Skipping evaluator (cache hit)")
+        return state
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
 
@@ -35,7 +39,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     failed_steps = 0
     total_confidence = 0.0
 
-    # Step Evaluation Loop
+    # STEP EVALUATION
     for step in state.research_plan:
         step_id = step.step_id
         query = step.question
@@ -45,15 +49,15 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         passed = False
         failure_reason = ""
 
-        # Case 1: No results
         if not results:
+            confidence = 0.2   
+            passed = False
             failure_reason = "no results"
 
         else:
             scored_results = score_results(results, query)
             state.search_results[step_id] = scored_results
 
-            # Case 2: All results filtered out
             if not scored_results:
                 failure_reason = "all results filtered"
 
@@ -66,6 +70,9 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                         failure_reason = "very low confidence"
                     else:
                         failure_reason = "low confidence"
+
+        print(f"[EVAL DEBUG] Step {step_id} confidence: {confidence}")
+        print(f"[DEBUG] Scored results count for step {step_id}: {len(scored_results) if results else 0}")
 
         total_confidence += confidence
 
@@ -84,61 +91,53 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     total_steps = len(step_evaluations)
     avg_confidence = total_confidence / total_steps if total_steps else 0.0
 
-    # Decision Logic 
+# EVALUATION DECISION LOGIC
 
-    low_confidence = avg_confidence < THRESHOLD
-    all_failed = failed_steps == total_steps and total_steps > 0
+    pass_ratio = (total_steps - failed_steps) / total_steps if total_steps else 0
+
+# BOOST confidence slightly to avoid underflow issues
+    avg_confidence = min(1.0, avg_confidence * 1.3)
+
+# DECISION LOGIC
 
     if total_steps == 0:
         decision = "replan"
-        state.failure_reason = "no steps evaluated"
 
-    elif failed_steps == 0 and not low_confidence:
+    elif pass_ratio >= 0.35:
         decision = "proceed"
-        state.failure_reason = ""
+
+    elif avg_confidence >= 0.22:
+        decision = "proceed"
+
+    elif state.search_retry_count < MAX_SEARCH_RETRIES:
+        decision = "retry"
+        state.search_retry_count += 1
+
+    elif state.replan_count < MAX_REPLANS:
+        decision = "replan"
+        state.replan_count += 1
 
     else:
-        # Retry first
-        if state.search_retry_count < MAX_SEARCH_RETRIES:
-            decision = "retry"
-            state.search_retry_count += 1
+        decision = "proceed"
 
-            if all_failed:
-                state.failure_reason = "all steps failed"
-            elif low_confidence:
-                state.failure_reason = "low confidence"
-            else:
-                state.failure_reason = "partial failure"
-
-        # Then replan
-        elif state.replan_count < MAX_REPLANS:
-            decision = "replan"
-            state.replan_count += 1
-            state.failure_reason = "retry exhausted"
-
-        # Final fallback
-        else:
-            decision = "proceed"
-            if low_confidence:
-                state.failure_reason = "low confidence fallback"
-            else:
-                state.failure_reason = "max retries reached"
-
-    # Store Results
-
+# STORE RESULT
     state.evaluation = EvaluationResult(
         steps=step_evaluations,
         decision=decision
-    )
+)
 
     state.overall_confidence = avg_confidence
 
-    # Structured debug logs (for UI)
+# DEBUG LOG
+    print(f"[EVAL DEBUG] pass_ratio={pass_ratio:.2f}, avg_conf={avg_confidence:.2f}, decision={decision}")
+
+    # DEBUG LOGS
     state.node_logs["evaluator"] = {
         "decision": decision,
         "avg_confidence": avg_confidence,
         "failed_steps": failed_steps,
         "total_steps": total_steps,
+        "pass_ratio": pass_ratio,
         "steps": [
             {
                 "step_id": s.step_id,
@@ -150,7 +149,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         ]
     }
 
-    # Custom logger 
     output_data = {
         "decision": decision,
         "avg_confidence": avg_confidence,

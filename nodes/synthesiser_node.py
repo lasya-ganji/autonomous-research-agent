@@ -15,6 +15,10 @@ import random
 @trace_node("synthesiser_node")
 def synthesiser_node(state: ResearchState) -> ResearchState:
     print("Synthesiser Node")
+        # 🔥 ADD THIS
+    if getattr(state, "skip_remaining", False):
+        print("⚡ Skipping synthesiser (cache hit)")
+        return state
 
     start_time = time.time()
 
@@ -28,7 +32,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
     MAX_CHUNK_SIZE = 1000
     MAX_CONTEXT_CHARS = 15000
     RESULTS_PER_STEP = 2
-    MAX_CHUNKS_PER_SOURCE = 2   # critical fix
+    MAX_CHUNKS_PER_SOURCE = 2
 
     # Step 1: Select top results per step
     selected_results = []
@@ -56,13 +60,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
     for r in selected_results:
         content = r.content if r.content else r.snippet
 
-        # skip weak content
         if not content or len(content.strip()) < 100:
             continue
 
         chunks = chunk_text(content) if r.content else [content]
-
-        # limit dominance per source
         chunks = chunks[:MAX_CHUNKS_PER_SOURCE]
 
         for chunk in chunks:
@@ -84,7 +85,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
         return state
 
-    # avoid positional bias
     random.shuffle(context_docs)
 
     # Step 3: Build prompt
@@ -123,7 +123,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                 continue
 
             citation_ids = c.get("citation_ids", [])
-
             if not citation_ids:
                 continue
 

@@ -1,73 +1,33 @@
-You are a deterministic scoring policy generator for a research agent.
+You are a deterministic scoring policy generator.
 
 Task: assign weights for ranking sources.
 
 Query: {query}
 
 Signals:
-- relevance: how directly content answers the query (must be highest or equal-highest)
-- recency: how recent/up-to-date the information is
-- domain: source credibility (research/official > established > unknown)
-- depth: level of detail and completeness
+- relevance (most important)
+- recency
+- domain
+- depth
 
-Guidelines:
-- time-sensitive → increase recency
-- technical/research → increase domain and depth
-- general → prioritize relevance
+Rules:
+1. Assign weights based on query type:
+   - technical → relevance, domain, depth high
+   - time-sensitive → recency high
+   - general → relevance dominant
 
-Computation (must follow exactly):
-1. Assign initial weights based on query type
-2. Normalize → sum = 1
+2. Ensure:
+   - relevance is highest
+   - all weights sum to 1
+   - no unnecessary minimum constraints
 
-3. Apply minimum thresholds:
-   relevance ≥ 0.35
-   recency ≥ 0.15
-   domain ≥ 0.15
-   depth ≥ 0.05
-   If violated: raise to threshold and reduce others proportionally
+3. Keep distribution meaningful (avoid flat values)
 
-4. Apply max cap:
-   no weight > 0.60
-   redistribute excess proportionally
-
-5. Normalize again → sum = exactly 1
-
-6. Ensure relevance is highest or tied highest
-
-7. Final validation:
-   all values ∈ [0,1], sum = 1, all keys present
-
-Fallback (if uncertain):
+Output JSON only:
 {
-  "relevance": 0.5,
-  "recency": 0.2,
-  "domain": 0.2,
-  "depth": 0.1,
-  "reason": "fallback"
-}
-
-Output rules:
-- return JSON only
-- keys: relevance, recency, domain, depth, reason
-- float values only
-- no extra text
-
-Examples:
-
-Query: latest AI trends
-{
-  "relevance": 0.40,
-  "recency": 0.35,
-  "domain": 0.15,
-  "depth": 0.10,
-  "reason": "time-sensitive"
-}
-
-Query: how transformers work
-{
-  "relevance": 0.45,
-  "recency": 0.15,
-  "domain": 0.20,
-  "depth": 0.20,
-  "reason": "technical"
+  "relevance": float,
+  "recency": float,
+  "domain": float,
+  "depth": float,
+  "reason": "short reason"
 }

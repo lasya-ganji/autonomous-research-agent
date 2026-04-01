@@ -11,3 +11,4 @@ class CacheModel(BaseModel):
     quality_score: float = Field(ge=0, le=1)
     citation_confidence: float = Field(ge=0, le=1)
     is_failed: bool = False
+    

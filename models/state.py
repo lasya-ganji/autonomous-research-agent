@@ -55,8 +55,14 @@ class ResearchState(BaseModel):
     cache_hit: bool = False
     caches: List[CacheModel] = Field(default_factory=list)
 
+    skip_search: bool = False
+    skip_eval: bool = False
+    skip_remaining: bool = False
+
+
     # Errors
     errors: List[ErrorLog] = Field(default_factory=list)
 
     # Observability / Debugging
     node_logs: Dict[str, Any] = Field(default_factory=dict)
+

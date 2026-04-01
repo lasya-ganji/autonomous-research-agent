@@ -1,4 +1,7 @@
 import json
+import traceback
+import numpy as np
+
 from datetime import datetime
 from models.state import ResearchState
 from models.report_models import ReportModel
@@ -6,10 +9,17 @@ from models.enums import CitationStatus
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from observability.tracing import trace_node
+from services.retrieval.embedding_service import get_embedding
+from app.dependencies import semantic_cache
+
 
 @trace_node("reporter_node")
 def reporter_node(state: ResearchState) -> ResearchState:
     print("Reporter Node")
+        # 🔥 ADD THIS
+    if state.cache_hit:
+        print("⚡ Returning cached final response")
+        return state
 
     # Step 1: Keep only VALID citations
     valid_citations = [
@@ -77,5 +87,53 @@ def reporter_node(state: ResearchState) -> ResearchState:
         "num_sections": len(state.report.sections),
         "citations_used": len(citations_list)
     }
+    print("[CACHE DEBUG] entered cache block")
+
+    try:
+        if not hasattr(state, "query") or not state.query:
+            print("❌ missing query")
+            return state
+
+        if not semantic_cache:
+            print("❌ cache not initialized")
+            return state
+
+        result_text = json.dumps(state.report.model_dump(), default=str)
+
+        if not result_text:
+            print("❌ no result_text found")
+            return state
+
+        embedding = get_embedding(state.query)
+
+        if not embedding or len(embedding) != semantic_cache.dim:
+            print("❌ invalid embedding:", embedding)
+            return state
+
+        emb = np.array([embedding], dtype="float32")
+
+        if len(emb.shape) != 2:
+            print("❌ invalid embedding shape:", emb.shape)
+            return state
+
+        print("[CACHE DEBUG] about to insert into FAISS")
+
+        semantic_cache.add(
+            query=state.query,
+            embedding=emb,
+            result=result_text,
+            quality_score=getattr(state, "overall_confidence", 0.7),
+            citation_confidence=getattr(state, "overall_confidence", 0.7),
+            is_failed=False,
+        )
+
+        print("✅ CACHE STORED SUCCESSFULLY")
+
+    except Exception as e:
+        print("🔥 CACHE STORE ERROR OCCURRED")
+        print("TYPE:", type(e))
+        print("REPR:", repr(e))
+        print("ARGS:", e.args)
+        traceback.print_exc()
 
     return state

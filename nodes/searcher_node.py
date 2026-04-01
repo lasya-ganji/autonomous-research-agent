@@ -7,15 +7,82 @@ from tools.scraper_tool import scrape_url
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
 
+from app.dependencies import semantic_cache
+from services.retrieval.embedding_service import get_embedding
+
 import time
 import uuid
 
-
 @trace_node("searcher_node")
+def safe_search(query):
+    for i in range(3):   # increase retries
+        try:
+            results = search_tool(query)
+
+            if results:   # ✅ ensure not empty
+                return results
+
+        except Exception as e:
+            print(f"[RETRY {i+1}] Search failed:", e)
+
+        time.sleep(2 ** i)   # exponential backoff
+
+    print("[SEARCH FAILED] Returning empty results")
+    return []
+
+
 def searcher_node(state: ResearchState) -> ResearchState:
     print("Searcher Node")
+    if getattr(state, "skip_search", False):
+        print("⚡ Skipping search (cache hit)")
+        return state
 
     start_time = time.time()
+
+    # CACHE CHECK
+    try:
+        # normalize query 
+        normalized_query = state.query.strip().lower()
+
+        query_embedding = get_embedding(normalized_query)
+        
+        if query_embedding is None:
+            print("[CACHE SKIP] No embedding")
+            state.cache_hit = False
+        else:
+            cached = semantic_cache.search(query_embedding)
+
+        if cached:
+            print("🔥 CACHE HIT")
+
+            state.cache_hit = True
+            state.report = cached.result
+            state.overall_confidence = cached.citation_confidence
+
+            state.skip_search = True   
+            state.skip_eval = True 
+
+            # ADD THIS
+            state.skip_remaining = True
+
+            # logging
+            if state.node_logs is None:
+                state.node_logs = {}
+
+            state.node_logs["cache"] = {
+                "hit": True,
+                "quality": cached.quality_score,
+                "confidence": cached.citation_confidence
+            }
+
+            return state
+
+        print("❌ CACHE MISS")
+        state.cache_hit = False
+
+    except Exception as e:
+        print(f"[CACHE ERROR] {e}")
+        state.cache_hit = False
 
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
@@ -27,16 +94,21 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
         for step in steps:
             step_id = step.step_id
-            query = step.question
+            base_query = step.question
+
+            # IMPROVED RETRY QUERY
+            if state.search_retry_count > 0:
+                query = f"{base_query} detailed explanation examples latest"
+            else:
+                query = base_query
 
             print(f"[SEARCHER NODE] Step {step_id}: {query}")
 
-            raw_results = search_tool(query)
+            raw_results = safe_search(query)
 
             structured_results = []
             seen_urls = set()
 
-            # scraping limits per priority
             scrape_limits = {
                 1: 3,
                 2: 2,
@@ -57,10 +129,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                     seen_urls.add(url)
 
-                    # Generate unique citation_id
                     citation_id = str(uuid.uuid4())
 
-                    # Safe scraping
                     content = None
                     if i < max_scrapes:
                         try:
@@ -68,7 +138,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         except Exception as e:
                             print(f"[SCRAPER ERROR] {url}: {e}")
 
-                    # fallback if snippet empty
                     if not snippet:
                         snippet = title
 
@@ -79,12 +148,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         snippet=snippet,
                         content=content,
 
-                        # placeholders (will be overwritten)
-                        quality_score=0.5,
-                        relevance_score=0.5,
-                        recency_score=0.5,
-                        domain_score=0.5,
-                        depth_score=0.5,
+                        quality_score=0.0,
+                        relevance_score=0.0,
+                        recency_score=0.0,
+                        domain_score=0.0,
+                        depth_score=0.0,
                         rank=1
                     )
 
@@ -95,7 +163,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
 
-    # Logger
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
@@ -103,7 +170,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
         start_time=start_time
     )
 
-    # Structured logs
     if state.node_logs is None:
         state.node_logs = {}
 
@@ -113,8 +179,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id: len(results)
             for step_id, results in state.search_results.items()
         },
-        "scraping": "enabled",
-        "top_k_scraped": 3
+        "retry_mode": state.search_retry_count > 0
     }
 
     state.node_execution_count += 1

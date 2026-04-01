@@ -17,6 +17,10 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     """
 
     print("Citation Manager Node")
+        # 🔥 ADD THIS
+    if getattr(state, "skip_remaining", False):
+        print("⚡ Skipping citation manager (cache hit)")
+        return state
 
     # Logger: start
     start_time = time.time()
