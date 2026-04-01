@@ -1,54 +1,96 @@
 from typing import List
-from pydantic import ValidationError
 from datetime import datetime, timezone
+import time
+import json
 
 from models.state import ResearchState
 from models.planner_models import PlanStep
 from models.error_models import ErrorLog
-from tools.llm_tool import call_llm
 
+from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
-import time
+from observability.tracing import trace_node
 
-start_time = time.time()
 
+@trace_node("planner_node")
 def planner_node(state: ResearchState) -> ResearchState:
+    start_time = time.time()
 
-    # Extract input
-    query: str = state.query
+    # execution safety
+    if state.node_execution_count >= 12:
+        raise Exception("Max node execution limit reached")
 
+    query = state.query
     if not query:
         raise ValueError("Query missing in state")
 
-    # Replan logic
-    is_replan: bool = state.replan_count > 0
+    is_replan = state.replan_count > 0
 
-    # Load prompt
-    if is_replan:
-        prompt_template = load_prompt("planner_replan.txt")
-    else:
-        prompt_template = load_prompt("planner_initial.txt")
-
-    prompt = prompt_template.format(query=query)
-
-    # Call LLM
-    response = call_llm(
-        prompt=prompt,
-        temperature=0,   # deterministic (as per PRD)
-        expect_json=True
+    prompt_template = load_prompt(
+        "planner_replan.txt" if is_replan else "planner_initial.txt"
     )
 
-    print("\n[PLANNER RESPONSE]:", response)
+    if is_replan:
+        previous_plan = "\n".join(
+            [f"{step.step_id}. {step.question}" for step in state.research_plan]
+        )
+        prompt = prompt_template.format(
+            query=query,
+            previous_plan=previous_plan,
+            failure_reason=state.failure_reason or "Low quality results"
+        )
+    else:
+        prompt = prompt_template.format(
+            query=query,
+            previous_plan="",
+            failure_reason=""
+        )
 
-    # Validate response
+    response = call_llm(prompt=prompt, temperature=0)
+
+    print("\n[PLANNER RESPONSE RAW]:", response)
+
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+        except Exception as e:
+            print(f"[PLANNER ERROR] JSON parsing failed: {e}")
+            response = []
+
     plan: List[PlanStep] = []
 
     if isinstance(response, list):
-        for item in response:
+        print(f"[DEBUG] Raw response length: {len(response)}")
+
+        for idx, item in enumerate(response):
             try:
-                plan.append(PlanStep(**item))
-            except ValidationError as e:
+                # safe extraction + cleaning
+                question = str(item.get("question", "")).strip()
+                priority = item.get("priority", idx + 1)
+
+                # enforce schema constraints manually
+                if len(question) < 5:
+                    raise ValueError("Question too short")
+
+                try:
+                    priority = int(priority)
+                except:
+                    priority = idx + 1
+
+                # clamp priority within allowed range
+                priority = max(1, min(priority, 5))
+
+                step = PlanStep(
+                    step_id=idx + 1,
+                    question=question,
+                    priority=priority
+                )
+
+                plan.append(step)
+
+            except Exception as e:
+                print(f"[PLANNER ERROR] Skipping invalid item: {item}, Error: {e}")
                 state.errors.append(
                     ErrorLog(
                         node="planner_node",
@@ -59,6 +101,7 @@ def planner_node(state: ResearchState) -> ResearchState:
                     )
                 )
     else:
+        print("[PLANNER ERROR] Response is not a list")
         state.errors.append(
             ErrorLog(
                 node="planner_node",
@@ -69,46 +112,39 @@ def planner_node(state: ResearchState) -> ResearchState:
             )
         )
 
-    # Fallback plan (safety)
+    print(f"[DEBUG] Parsed steps count: {len(plan)}")
+
+    # fallback
     if not plan:
-        plan = [
-            PlanStep(
-                step_id=1,
-                question=query,
-                priority=5
-            )
-        ]
+        plan = [PlanStep(step_id=1, question=query, priority=1)]
 
-    # 🔹 Enforce max 3 steps (PRD requirement)
-    plan = plan[:3]
+    # sort and limit
+    plan = sorted(plan, key=lambda x: x.priority)[:3]
 
-    # 🔹 Ensure step_ids are consistent (1,2,3...)
+    # reassign step ids
     for idx, step in enumerate(plan, start=1):
         step.step_id = idx
 
-    # Sort by priority (optional but fine)
-    plan = sorted(plan, key=lambda x: x.priority, reverse=True)
-
-    # Store plan
     state.research_plan = plan
-
-    # Reset search results
     state.search_results = {}
-
-    # 🔹 Track unresolved steps correctly (use step_ids, not index)
-    state.unresolved_steps = [step.step_id for step in plan]
-
-    # Reset retry counter
     state.search_retry_count = 0
 
-    # Observability
+    print(f"[DEBUG] Planner steps stored: {len(state.research_plan)}")
+
     state.node_execution_count += 1
 
     log_node_execution(
-    node_name="planner_node",
-    input_data=query,
-    output_data=[step.model_dump() for step in plan],
-    start_time=start_time
+        node_name="planner_node",
+        input_data=query,
+        output_data=[step.model_dump() for step in plan],
+        start_time=start_time
     )
-    
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    state.node_logs["planner"] = {
+        "num_steps": len(state.research_plan),
+        "questions": [step.question for step in state.research_plan]
+    }
+
     return state

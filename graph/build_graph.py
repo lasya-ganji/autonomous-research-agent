@@ -8,10 +8,13 @@ from nodes.synthesiser_node import synthesiser_node
 from nodes.citation_manager_node import citation_manager_node
 from nodes.reporter_node import reporter_node
 
+from graph.routing import route_after_evaluator
+
 
 def build_graph():
     graph = StateGraph(ResearchState)
 
+    # Add nodes
     graph.add_node("planner", planner_node)
     graph.add_node("searcher", searcher_node)
     graph.add_node("evaluator", evaluator_node)
@@ -19,11 +22,25 @@ def build_graph():
     graph.add_node("citation_manager", citation_manager_node)
     graph.add_node("reporter", reporter_node)
 
+    # Entry point
     graph.set_entry_point("planner")
 
+    # Linear flow 
     graph.add_edge("planner", "searcher")
     graph.add_edge("searcher", "evaluator")
-    graph.add_edge("evaluator", "synthesiser")
+
+    # Conditional routing
+    graph.add_conditional_edges(
+        "evaluator",
+        route_after_evaluator,
+        {
+            "proceed": "synthesiser",
+            "retry": "searcher",
+            "replan": "planner",
+        },
+    )
+
+    # Final pipeline
     graph.add_edge("synthesiser", "citation_manager")
     graph.add_edge("citation_manager", "reporter")
 

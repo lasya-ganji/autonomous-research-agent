@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Any, Optional
 
-from models.enums import DecisionEnum
 from models.planner_models import PlanStep
 from models.search_models import SearchResult
 from models.evaluation_models import EvaluationResult
@@ -12,44 +11,56 @@ from models.error_models import ErrorLog
 from models.cache_models import CacheModel
 
 
-class Evaluation(BaseModel):
-    confidence_score: float = Field(ge=0, le=1, default=0.0)
-    decision: DecisionEnum = DecisionEnum.proceed
-
-
 class ResearchState(BaseModel):
+    # INPUT
     query: str
 
+    # PLANNER
     research_plan: List[PlanStep] = Field(default_factory=list)
 
+    # SEARCH
     search_results: Dict[int, List[SearchResult]] = Field(default_factory=dict)
+    failed_queries: List[str] = Field(default_factory=list)
 
-    citations: Dict[str, Citation] = Field(default_factory=dict)
-
+    # DEDUPLICATION
     deduplicated_urls: Set[str] = Field(default_factory=set)
 
+    # CONTEXT BUILDING
     context_docs: List[str] = Field(default_factory=list)
-
     doc_summaries: Dict[str, str] = Field(default_factory=dict)
 
-    synthesis: SynthesisModel | None = None
-    report: ReportModel | None = None
+    # EVALUATION
+    evaluation: Optional[EvaluationResult] = None
+    failure_reason: str = ""
+    overall_confidence: float = 0.0  
 
-    evaluation: EvaluationResult | None = None
+    # RETRY / REPLAN
+    search_retry_count: int = Field(default=0, ge=0)
+    replan_count: int = Field(default=0, ge=0)
 
-    search_retry_count: int = Field(ge=0, default=0)
-    replan_count: int = Field(ge=0, default=0)
-
-    node_execution_count: int = Field(ge=0, le=12, default=0)
-
-    token_usage: int = Field(ge=0, default=0)
-    budget_remaining: int = Field(ge=0, default=0)
-
-    cache_hit: bool = False
-
+    # EXECUTION TRACKING
     unresolved_steps: List[int] = Field(default_factory=list)
+    node_execution_count: int = Field(default=0, ge=0, le=12)
 
+    # OUTPUT
+    synthesis: Optional[SynthesisModel] = None
+    report: Optional[ReportModel] = None
+
+    # CITATIONS (SOURCE OF TRUTH)
+    citations: Dict[str, Citation] = Field(default_factory=dict)
+
+    # Track which citations are used in synthesis/report
+    used_citation_ids: Set[str] = Field(default_factory=set)
+    citation_mapping: Dict[str, str] = {}
+
+    # BUDGET / CACHING
+    token_usage: int = Field(default=0, ge=0)
+    budget_remaining: int = Field(default=0, ge=0)
+    cache_hit: bool = False
+    caches: List[CacheModel] = Field(default_factory=list)
+
+    # ERRORS
     errors: List[ErrorLog] = Field(default_factory=list)
 
-    caches: List[CacheModel] = Field(default_factory=list)
-    failed_queries: List[str] = Field(default_factory=list)
+    # DEBUG / OBSERVABILITY
+    node_logs: Dict[str, Any] = Field(default_factory=dict)

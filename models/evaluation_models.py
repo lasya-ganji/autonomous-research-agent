@@ -6,6 +6,7 @@ class StepEvaluation(BaseModel):
     step_id: int
     confidence_score: float
     passed: bool
+    failure_reason: str = ""
 
 
 class EvaluationResult(BaseModel):

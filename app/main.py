@@ -1,7 +1,10 @@
+from observability.langsmith_config import setup_langsmith
 from app.agent_runner import run_agent
 
+setup_langsmith()
+
 if __name__ == "__main__":
-    result = run_agent("Difference between CNN and RNN")
+    result = run_agent("What are the latest advancements in renewable energy technologies?")
     print("\nFull Result:\n", result)
     report = result.get("report")
     print("\n" + "="*50)

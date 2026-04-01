@@ -8,5 +8,5 @@ class Citation(BaseModel):
     title: str
     author: Optional[str] = None
     date_accessed: str
-    quality_score: float = Field(ge=0, le=1)
+    quality_score: float = Field(default=0.5, ge=0, le=1)
     status: CitationStatus = CitationStatus.valid

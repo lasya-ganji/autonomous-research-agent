@@ -1,53 +1,113 @@
 from models.state import ResearchState
+from models.search_models import SearchResult
+from models.citation_models import Citation
+from models.enums import CitationStatus
+
 from tools.search_tool import search_tool
-from services.evaluation.scoring_service import score_results
+from tools.scraper_tool import scrape_url
+
+from services.retrieval.dedup_service import deduplicate_results
+from services.citation.citation_service import validate_url
+
 from utils.logger import log_node_execution
+from observability.tracing import trace_node
+
 import time
+from datetime import datetime
 
 
+@trace_node("searcher_node")
 def searcher_node(state: ResearchState) -> ResearchState:
-    print("Searcher Node")
+
     start_time = time.time()
 
+    if state.node_execution_count >= 12:
+        raise Exception("Max node execution limit reached")
+
+    state.search_results = {}
+
+    seen_urls = set()
+    citation_counter = len(state.citations)
+
     try:
-        # Loop through each planned step
-        for step in state.research_plan:
+        steps = sorted(state.research_plan, key=lambda x: x.priority)
+
+        for step in steps:
             step_id = step.step_id
             query = step.question
 
-            print(f"[SEARCHER NODE] Step {step_id}: {query}")
+            raw_results = search_tool(query)
 
-            results = search_tool(query)
+            if not raw_results:
+                fallback_query = " ".join(query.split()[:6])
+                raw_results = search_tool(fallback_query)
 
-            # Handle no results
-            if not results:
-                print(f"[SEARCHER NODE] No results for step {step_id}")
-                state.failed_queries.append(query)
-                continue
+            unique_results = deduplicate_results(raw_results or [], seen_urls)
 
-            # Apply scoring
-            results = score_results(results, query)
+            structured_results = []
 
-            # Store results per step_id
-            state.search_results[step_id] = results
+            scrape_limits = {1: 3, 2: 2, 3: 1}
+            max_scrapes = scrape_limits.get(step.priority, 1)
+            scrape_count = 0
 
-            print(f"[SEARCHER NODE] Stored {len(results)} results for step {step_id}")
+            for r, norm_url in unique_results:
 
-        # Update unresolved steps
-        state.unresolved_steps = [
-            step.step_id for step in state.research_plan
-            if step.step_id not in state.search_results
-        ]
+                title = getattr(r, "title", "Untitled")
+                snippet = getattr(r, "snippet", "") or title
 
-        # Retry logic
-        if not state.search_results:
-            state.search_retry_count += 1
+                citation_counter += 1
+                citation_id = f"[{citation_counter}]"
+
+                # validate EARLY
+                try:
+                    status = validate_url(norm_url)
+                except Exception:
+                    status = CitationStatus.broken
+
+                content = None
+                if scrape_count < max_scrapes:
+                    try:
+                        scraped = scrape_url(norm_url)
+
+                        content = scraped.get("content")
+                        publish_date = scraped.get("publish_date")
+                        
+                        scrape_count += 1
+                    except Exception:
+                        pass
+
+                result = SearchResult(
+                    citation_id=citation_id,
+                    url=norm_url,
+                    title=title,
+                    snippet=snippet,
+                    content=content,
+                    publish_date=publish_date,
+                    quality_score=0.5,
+                    relevance_score=0.5,
+                    recency_score=0.5,
+                    domain_score=0.5,
+                    depth_score=0.5,
+                    rank=1
+                )
+
+                structured_results.append(result)
+
+                # source of truth
+                state.citations[citation_id] = Citation(
+                    citation_id=citation_id,
+                    title=title,
+                    url=norm_url,
+                    quality_score=0.5,
+                    status=status,
+                    date_accessed=datetime.now().isoformat()
+                )
+
+            state.search_results[step_id] = structured_results
 
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
-        state.failed_queries.append(state.query)
 
-    # ALWAYS log (even if exception happens)
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
@@ -55,7 +115,15 @@ def searcher_node(state: ResearchState) -> ResearchState:
         start_time=start_time
     )
 
-    # Observability
+    state.node_logs["searcher"] = {
+        "total_steps": len(state.research_plan),
+        "results_per_step": {
+            step_id: len(results)
+            for step_id, results in state.search_results.items()
+        },
+        "total_citations": len(state.citations)
+    }
+
     state.node_execution_count += 1
 
     return state

@@ -1,90 +1,189 @@
 from models.state import ResearchState
 from models.evaluation_models import StepEvaluation, EvaluationResult
 
+from services.evaluation.scoring_service import score_results
+from services.evaluation.confidence_service import compute_confidence
 
-# Base threshold for confidence (adjusted for current scoring system)
-THRESHOLD = 0.45
+from observability.tracing import trace_node
+from utils.logger import log_node_execution
 
-# Retry limits (as per design decisions)
-MAX_SEARCH_RETRIES = 1   # Only 1 retry for low-confidence results
-MAX_REPLANS = 1          # Only 1 replan allowed
+import time
+
+# CONFIG 
+
+THRESHOLD = 0.4
+LOW_CONF_THRESHOLD = 0.3
+
+MAX_SEARCH_RETRIES = 1
+MAX_REPLANS = 1
+
+CONFIDENCE_IMPROVEMENT_EPS = 0.02  # loop detection
 
 
+@trace_node("evaluator_node")
 def evaluator_node(state: ResearchState) -> ResearchState:
-    print("Evaluator Node")
+
+    if state.node_execution_count >= 12:
+        raise Exception("Max node execution limit reached")
+
+    start_time = time.time()
+
+    input_data = {
+        "num_steps": len(state.research_plan),
+        "retry_count": state.search_retry_count,
+        "replan_count": state.replan_count,
+        "prev_confidence": state.overall_confidence
+    }
 
     step_evaluations = []
     failed_steps = 0
+    total_confidence = 0.0
 
-    #  Iterate through results of each planned step
-    for step_id, results in state.search_results.items():
+    # STEP EVALUATION
 
-        # Extract quality scores (already computed in scoring_service)
-        scores = [r.quality_score for r in results]
+    for step in state.research_plan:
+        step_id = step.step_id
+        query = step.question
+        results = state.search_results.get(step_id, [])
 
-        # Compute average confidence for this step
-        avg_score = sum(scores) / len(scores) if scores else 0.0
+        confidence = 0.0
+        passed = False
+        failure_reason = ""
 
-        # Check if this step passed quality threshold
-        passed = avg_score >= THRESHOLD
+        if not results:
+            failure_reason = "no results"
+
+        else:
+            scored_results = score_results(results, query)
+            state.search_results[step_id] = scored_results
+
+            if not scored_results:
+                failure_reason = "all results filtered"
+
+            else:
+                confidence = compute_confidence(scored_results)
+                passed = confidence >= THRESHOLD
+
+                if not passed:
+                    if confidence < LOW_CONF_THRESHOLD:
+                        failure_reason = "very low confidence"
+                    else:
+                        failure_reason = "low confidence"
+
+        total_confidence += confidence
 
         if not passed:
             failed_steps += 1
 
-        # Store per-step evaluation
         step_evaluations.append(
             StepEvaluation(
                 step_id=step_id,
-                confidence_score=avg_score,
-                passed=passed
+                confidence_score=confidence,
+                passed=passed,
+                failure_reason=failure_reason
             )
         )
 
     total_steps = len(step_evaluations)
+    avg_confidence = total_confidence / total_steps if total_steps else 0.0
 
-    # DECISION LOGIC (CORE INTELLIGENCE)
+    # LOOP / STAGNATION DETECTION
 
-    # Case 0: No steps evaluated → force replan
+    prev_conf = state.overall_confidence or 0.0
+
+    # improvement must be positive AND meaningful
+    improvement = avg_confidence - prev_conf
+
+    no_improvement = improvement <= CONFIDENCE_IMPROVEMENT_EPS
+
+    low_confidence = avg_confidence < THRESHOLD
+    all_failed = failed_steps == total_steps and total_steps > 0
+    
+    # DECISION LOGIC (FINAL)
+
     if total_steps == 0:
         decision = "replan"
+        state.failure_reason = "no steps evaluated"
 
-    # Case 1: Majority steps failed → directly replan
-    elif failed_steps / total_steps > 0.5:
+    elif avg_confidence >= THRESHOLD and failed_steps == 0:
+        decision = "proceed"
+        state.failure_reason = ""
 
-        if state.replan_count < MAX_REPLANS:
-            decision = "replan"
-            state.replan_count += 1
-        else:
-            # Prevent infinite loop → proceed anyway
+    else:
+        # STOP LOOP if no improvement
+        if no_improvement:
             decision = "proceed"
+            state.failure_reason = "no improvement"
 
-    # Case 2: Partial failure → retry once, then replan
-    elif failed_steps > 0:
-
-        # First try → retry search (same plan)
-        if state.search_retry_count < MAX_SEARCH_RETRIES:
+        # Retry first
+        elif state.search_retry_count < MAX_SEARCH_RETRIES:
             decision = "retry"
             state.search_retry_count += 1
 
-        # If retry already done → replan
+            if all_failed:
+                state.failure_reason = "all steps failed"
+            elif low_confidence:
+                state.failure_reason = "low confidence"
+            else:
+                state.failure_reason = "partial failure"
+
+        # Then replan
         elif state.replan_count < MAX_REPLANS:
             decision = "replan"
             state.replan_count += 1
+            state.failure_reason = "retry exhausted"
 
-        # If both retry + replan done → proceed
+        # Final fallback (partial output)
         else:
             decision = "proceed"
+            state.failure_reason = "max retries reached"
 
-    # Case 3: All steps passed → proceed
-    else:
-        decision = "proceed"
+    # STORE RESULTS
 
-    #  Store evaluation result in state
     state.evaluation = EvaluationResult(
         steps=step_evaluations,
         decision=decision
     )
 
-    print(f"[EVALUATOR] Decision: {decision}")
+    state.overall_confidence = avg_confidence
+    
+    # PROPAGATE SCORES TO CITATIONS
+    for results in state.search_results.values():
+        for r in results:
+            cid = getattr(r, "citation_id", None)
+
+            if cid and cid in state.citations:
+                state.citations[cid].quality_score = round(r.quality_score, 3)
+
+    # DEBUG LOGS (UI)
+
+    state.node_logs["evaluator"] = {
+        "decision": decision,
+        "avg_confidence": avg_confidence,
+        "failed_steps": failed_steps,
+        "total_steps": total_steps,
+        "no_improvement": no_improvement,
+        "steps": [
+            {
+                "step_id": s.step_id,
+                "confidence": s.confidence_score,
+                "passed": s.passed,
+                "reason": s.failure_reason
+            }
+            for s in step_evaluations
+        ]
+    }
+
+    # LOGGER
+
+    output_data = {
+        "decision": decision,
+        "avg_confidence": avg_confidence,
+        "failed_steps": failed_steps
+    }
+
+    log_node_execution("evaluator", input_data, output_data, start_time)
+
+    state.node_execution_count += 1
 
     return state

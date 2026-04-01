@@ -13,19 +13,81 @@ Failure Context:
 {failure_reason}
 
 INSTRUCTIONS:
-- Analyze why the previous plan failed:
-  - vague questions
-  - missing aspects
+- Analyze why the previous plan failed, e.g.:
+  - vague or unclear questions
+  - missing important aspects
   - poor searchability
   - redundancy
 - Improve the plan by:
-  - making questions more specific and precise
+  - making questions more specific, precise, and independently answerable
   - covering missing aspects
   - removing ineffective or redundant questions
 - Each question must:
   - be self-contained
-  - be directly searchable
-  - be distinct from others
+  - directly searchable
+  - distinct from others
+
+GUARDS:
+- Do NOT generate more or fewer than 3 sub-questions
+- Do NOT include explanations, summaries, or markdown
+- Do NOT reuse ineffective wording from the previous plan
+- Each question must be independently searchable and distinct from others
+
+FEW-SHOT EXAMPLES:
+
+Example 1:
+Original Query: How can electric vehicles reduce urban pollution while remaining cost-effective?
+Previous Plan: [
+  {{"step_id": 1, "question": "How do EVs reduce pollution?", "priority": 1}},
+  {{"step_id": 2, "question": "Are EVs affordable?", "priority": 2}},
+  {{"step_id": 3, "question": "What are government policies?", "priority": 3}}
+]
+Failure Context: Questions were too vague and overlapping
+
+[
+  {{
+    "step_id": 1,
+    "question": "What measurable impact do electric vehicles have on urban air pollution levels?",
+    "priority": 1
+  }},
+  {{
+    "step_id": 2,
+    "question": "Which factors influence the cost-effectiveness of electric vehicles for consumers?",
+    "priority": 2
+  }},
+  {{
+    "step_id": 3,
+    "question": "What government policies or incentives currently support EV adoption in major cities?",
+    "priority": 3
+  }}
+]
+
+Example 2:
+Original Query: How can AI models be deployed in healthcare without violating patient privacy?
+Previous Plan: [
+  {{"step_id": 1, "question": "How to deploy AI in healthcare?", "priority": 1}},
+  {{"step_id": 2, "question": "What about privacy?", "priority": 2}},
+  {{"step_id": 3, "question": "Are there regulations?", "priority": 3}}
+]
+Failure Context: Questions were vague, overlapping, and too general
+
+[
+  {{
+    "step_id": 1,
+    "question": "What deployment strategies allow AI models to assist in healthcare diagnostics?",
+    "priority": 1
+  }},
+  {{
+    "step_id": 2,
+    "question": "How do these strategies ensure patient data privacy and compliance?",
+    "priority": 2
+  }},
+  {{
+    "step_id": 3,
+    "question": "What regulatory frameworks govern the use of AI in healthcare?",
+    "priority": 3
+  }}
+]
 
 CONSTRAINTS:
 - Generate EXACTLY 3 sub-questions

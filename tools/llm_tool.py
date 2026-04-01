@@ -11,19 +11,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def call_llm(prompt: str, temperature: float = 0.2, expect_json: bool = False):
-    """
-    Calls LLM and returns parsed response.
-
-    Args:
-        prompt (str): Input prompt
-        temperature (float): Sampling temperature
-        expect_json (bool): Whether JSON output is expected
-
-    Returns:
-        dict | list | str: Parsed response
-    """
-
+def call_llm(prompt: str, temperature: float = 0.2):
     try:
         messages = [
             {
@@ -51,27 +39,9 @@ If JSON is requested:
             temperature=temperature
         )
 
-        # Extract content
         content = response.choices[0].message.content
 
         print("\n[LLM RAW OUTPUT]:\n", content)
-
-        if expect_json:
-            try:
-                content = re.sub(r"```json|```", "", content).strip()
-                parsed = json.loads(content)
-
-                # Handle case where model wraps list in object
-                if isinstance(parsed, dict) and "steps" in parsed:
-                    return parsed["steps"]
-
-                return parsed
-
-            except Exception:
-                return {
-                    "error": "Invalid JSON",
-                    "raw": content
-                }
 
         return content
 

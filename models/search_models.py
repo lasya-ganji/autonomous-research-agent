@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, HttpUrl
 from typing import Optional
 
 class SearchResult(BaseModel):
@@ -7,11 +7,12 @@ class SearchResult(BaseModel):
     title: str
     snippet: str
     content: Optional[str] = None
+    publish_date: Optional[str] = None
 
-    quality_score: float = Field(ge=0, le=1)
-    relevance_score: float = Field(ge=0, le=1)
-    recency_score: float = Field(ge=0, le=1)
-    domain_score: float = Field(ge=0, le=1)
-    depth_score: float = Field(ge=0, le=1)
+    quality_score: Optional[float] = None
+    relevance_score: Optional[float] = None
+    recency_score: Optional[float] = None
+    domain_score: Optional[float] = None
+    depth_score: Optional[float] = None
 
-    rank: int = Field(ge=1)
+    rank: Optional[int] = None
