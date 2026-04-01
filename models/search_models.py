@@ -7,6 +7,7 @@ class SearchResult(BaseModel):
     title: str
     snippet: str
     content: Optional[str] = None
+    publish_date: Optional[str] = None
 
     quality_score: Optional[float] = None
     relevance_score: Optional[float] = None

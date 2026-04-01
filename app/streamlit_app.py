@@ -22,7 +22,8 @@ if run_button:
         result = run_agent(query)
 
     try:
-        result = result.dict()
+        if hasattr(result, "dict"):
+            result = result.dict()
     except Exception:
         pass
 
@@ -142,30 +143,61 @@ if run_button:
     with tab6:
         st.subheader("Citations")
 
-        all_citations = result.get("citations")
+        all_citations = result.get("citations", {})
         used_ids = result.get("used_citation_ids", [])
+        mapping = result.get("citation_mapping", {})
 
         if all_citations and used_ids:
 
-            for cid in used_ids:
-                c = all_citations.get(cid)
+            # Sort based on original numeric order
+            sorted_old_ids = sorted(
+                used_ids,
+                key=lambda x: int(x.strip("[]")) if x.strip("[]").isdigit() else float("inf")
+            )
 
+            for old_id in sorted_old_ids:
+
+                c = all_citations.get(old_id)
                 if not c:
                     continue
 
-                # status indicator
-                if c.status == "valid":
-                    status = "🟢"
-                elif c.status == "stale":
-                    status = "🟡"
+                #  Safe ID mapping
+                new_id = mapping.get(old_id, old_id)
+
+                #  Safe title
+                title = getattr(c, "title", "Untitled Source")
+
+                #  Status handling
+                status_val = getattr(c, "status", "unknown")
+
+                if status_val == "valid":
+                    status_icon = "🟢"
+                elif status_val == "stale":
+                    status_icon = "🟡"
                 else:
-                    status = "🔴"
+                    status_icon = "🔴"
 
-                st.markdown(f"**{cid} {status} {c.title}**")
-                st.caption(c.url)
+                quality = getattr(c, "quality_score", None)
 
-                st.write(f"Quality: {round(c.quality_score,2)}")
-                st.write(f"Status: `{c.status}`")
+                if quality is None:
+                    quality = 0.0
+
+                # clamp (safety)
+                quality = max(0.0, min(float(quality), 1.0))
+
+                # Display
+                st.markdown(f"**{new_id} {status_icon} {title}**")
+
+                # URL safe display
+                try:
+                    st.caption(str(c.url))
+                except:
+                    st.caption("URL unavailable")
+
+                # Better UX: percentage
+                st.write(f"Quality: {round(quality * 100, 1)}%")
+
+                st.write(f"Status: `{status_val}`")
 
                 st.divider()
 

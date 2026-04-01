@@ -67,7 +67,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 content = None
                 if scrape_count < max_scrapes:
                     try:
-                        content = scrape_url(norm_url)
+                        scraped = scrape_url(norm_url)
+
+                        content = scraped.get("content")
+                        publish_date = scraped.get("publish_date")
+                        
                         scrape_count += 1
                     except Exception:
                         pass
@@ -78,6 +82,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     title=title,
                     snippet=snippet,
                     content=content,
+                    publish_date=publish_date,
                     quality_score=0.5,
                     relevance_score=0.5,
                     recency_score=0.5,

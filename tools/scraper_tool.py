@@ -12,32 +12,39 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-def scrape_url(url: str) -> str:
+def scrape_url(url: str) -> dict:
     try:
-        # Fetch page
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            timeout=5
-        )
+        response = requests.get(url, headers=HEADERS, timeout=5)
 
         if response.status_code != 200:
-            return ""
+            return {"content": "", "publish_date": None}
 
         html = response.text
 
-        # Try Trafilatura
+        # Extract content
         extracted = trafilatura.extract(html)
 
-        if extracted and len(extracted.strip()) > 200:
-            return clean_text(extracted)
+        # Extract metadata
+        metadata = trafilatura.extract_metadata(html)
 
-        # Fallback → BeautifulSoup
-        return fallback_bs4(html)
+        content = ""
+        if extracted and len(extracted.strip()) > 200:
+            content = clean_text(extracted)
+        else:
+            content = fallback_bs4(html)
+
+        publish_date = None
+        if metadata and metadata.date:
+            publish_date = metadata.date
+
+        return {
+            "content": content,
+            "publish_date": publish_date
+        }
 
     except Exception as e:
         print(f"[SCRAPER ERROR] {e}")
-        return ""
+        return {"content": "", "publish_date": None}
 
 # Clean text function
 def clean_text(text: str) -> str:
