@@ -1,5 +1,6 @@
 from models.state import ResearchState
 from models.synthesis_models import SynthesisModel, Claim
+from models.enums import CitationStatus
 
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
@@ -14,172 +15,136 @@ import random
 
 @trace_node("synthesiser_node")
 def synthesiser_node(state: ResearchState) -> ResearchState:
-    print("Synthesiser Node")
 
     start_time = time.time()
 
-    input_data = {
-        "query": state.query[:100],
-        "num_steps": len(state.search_results),
-    }
+    # FILTER VALID RESULTS FIRST
+    valid_results = []
 
-    # CONFIG
-    MAX_CHUNKS = 12
-    MAX_CHUNK_SIZE = 1000
-    MAX_CONTEXT_CHARS = 15000
-    RESULTS_PER_STEP = 2
-    MAX_CHUNKS_PER_SOURCE = 2   
+    for results in state.search_results.values():
+        for r in results:
+            citation = state.citations.get(r.citation_id)
 
-    # Step 1: Select top results per step
-    selected_results = []
+            if not citation:
+                continue
 
-    for step_id, results in state.search_results.items():
-        if not results:
-            continue
+            if citation.status != CitationStatus.valid:
+                continue
 
-        top_results = sorted(
-            results,
-            key=lambda x: getattr(x, "quality_score", 0),
-            reverse=True
-        )[:RESULTS_PER_STEP]
+            valid_results.append(r)
 
-        selected_results.extend(top_results)
-
-    if not selected_results:
+    if not valid_results:
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
         return state
 
-    # Step 2: Build balanced context
+    # SELECT TOP RESULTS
+    valid_results = sorted(
+        valid_results,
+        key=lambda x: getattr(x, "quality_score", 0),
+        reverse=True
+    )[:6]
+
+    # BUILD CONTEXT
     context_docs = []
     chunk_count = 0
 
-    for r in selected_results:
-        content = r.content if r.content else r.snippet
+    for r in valid_results:
 
-        # skip weak content
+        content = r.content or r.snippet
+
         if not content or len(content.strip()) < 100:
             continue
 
         chunks = chunk_text(content) if r.content else [content]
-
-        # limit dominance per source
-        chunks = chunks[:MAX_CHUNKS_PER_SOURCE]
+        chunks = chunks[:2]
 
         for chunk in chunks:
-            if chunk_count >= MAX_CHUNKS:
+            if chunk_count >= 12:
                 break
 
-            chunk = chunk[:MAX_CHUNK_SIZE]
-
-            context_docs.append(
-                f"[{r.citation_id}] {r.title}. {chunk}"
-            )
-
+            context_docs.append(f"{r.citation_id} {chunk[:1000]}")
             chunk_count += 1
-
-        if chunk_count >= MAX_CHUNKS:
-            break
 
     if not context_docs:
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
         return state
 
-    # avoid positional bias
     random.shuffle(context_docs)
 
-    # Step 3: Build prompt
-    context_str = "\n\n".join(context_docs)
+    context_str = "\n\n".join(context_docs)[:15000]
 
-    if len(context_str) > MAX_CONTEXT_CHARS:
-        context_str = context_str[:MAX_CONTEXT_CHARS]
+    # LLM
+    prompt = load_prompt("synthesiser.txt")\
+        .replace("{query}", state.query)\
+        .replace("{context_docs}", context_str)
 
-    prompt_template = load_prompt("synthesiser.txt")
-
-    prompt = prompt_template.replace("{query}", state.query)
-    prompt = prompt.replace("{context_docs}", context_str)
-
-    # Step 4: Call LLM
     response = call_llm(prompt=prompt, temperature=0)
 
-    # Step 5: Parse response
-    if isinstance(response, str):
-        try:
-            response = json.loads(response)
-        except Exception as e:
-            print("[SYNTHESIS ERROR] JSON parse failed:", e)
-            response = {}
+    try:
+        response = json.loads(response) if isinstance(response, str) else response
+    except:
+        response = {}
 
-    print("[SYNTHESIS RAW]:", response)
-    print("[DEBUG CONTEXT SAMPLE]:", context_docs[:2])
-
-    # Step 6: Extract claims
+    # BUILD CLAIMS
     claims = []
+    used_ids = set()
 
-    if isinstance(response, dict):
-        raw_claims = response.get("claims", [])
+    valid_ids_set = {
+        cid for cid, c in state.citations.items()
+        if c.status == CitationStatus.valid
+    }
 
-        for c in raw_claims:
-            if not isinstance(c, dict):
-                continue
+    for c in response.get("claims", []):
+        text = c.get("text", "").strip()
+        if not text:
+            continue
 
-            citation_ids = c.get("citation_ids", [])
+        raw_ids = c.get("citation_ids", [])
 
-            if not citation_ids:
-                continue
+        filtered_ids = []
 
-            text = c.get("text", "").strip()
-            if not text:
-                continue
+        for cid in raw_ids:
+            cid = str(cid).strip()
+            if not cid.startswith("["):
+                cid = f"[{cid}]"
 
-            try:
-                confidence = float(c.get("confidence", 0.5))
-            except Exception:
-                confidence = 0.5
+            if cid in valid_ids_set:
+                filtered_ids.append(cid)
 
-            claims.append(
-                Claim(
-                    text=text,
-                    citation_ids=citation_ids,
-                    confidence=confidence,
-                    verified=True,
-                    citation_confidence=1.0
-                )
+        if not filtered_ids:
+            continue
+
+        try:
+            confidence = float(c.get("confidence", 0.5))
+        except:
+            confidence = 0.5
+
+        used_ids.update(filtered_ids)
+
+        claims.append(
+            Claim(
+                text=text,
+                citation_ids=filtered_ids,
+                confidence=confidence,
+                verified=True,
+                citation_confidence=1.0
             )
+        )
 
-    # Step 7: Store synthesis
+    state.used_citation_ids = used_ids
+
     state.synthesis = SynthesisModel(
         claims=claims,
-        conflicts=response.get("conflicts", []) if isinstance(response, dict) else [],
+        conflicts=response.get("conflicts", []),
         partial=(len(claims) == 0)
     )
 
-    # Step 8: Logs
-    if state.node_logs is None:
-        state.node_logs = {}
-
     state.node_logs["synthesiser"] = {
         "num_claims": len(claims),
-        "used_sources": len(selected_results),
-        "chunks_used": len(context_docs),
-        "partial": state.synthesis.partial,
-        "claims": [
-            {
-                "text": c.text,
-                "confidence": c.confidence,
-                "citations": c.citation_ids
-            }
-            for c in claims
-        ]
+        "valid_citations_used": len(used_ids),
+        "partial": state.synthesis.partial
     }
 
-    # Step 9: Logger
-    output_data = {
-        "num_claims": len(claims),
-        "partial": state.synthesis.partial,
-        "used_sources": len(selected_results),
-        "chunks_used": len(context_docs)
-    }
-
-    log_node_execution("synthesiser", input_data, output_data, start_time)
+    log_node_execution("synthesiser", {}, {}, start_time)
 
     return state

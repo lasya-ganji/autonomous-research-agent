@@ -90,8 +90,15 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     # LOOP / STAGNATION DETECTION
 
     prev_conf = state.overall_confidence or 0.0
-    no_improvement = abs(avg_confidence - prev_conf) < CONFIDENCE_IMPROVEMENT_EPS
 
+    # improvement must be positive AND meaningful
+    improvement = avg_confidence - prev_conf
+
+    no_improvement = improvement <= CONFIDENCE_IMPROVEMENT_EPS
+
+    low_confidence = avg_confidence < THRESHOLD
+    all_failed = failed_steps == total_steps and total_steps > 0
+    
     # DECISION LOGIC (FINAL)
 
     if total_steps == 0:
@@ -106,17 +113,19 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         # STOP LOOP if no improvement
         if no_improvement:
             decision = "proceed"
-            state.failure_reason = "no improvement fallback"
+            state.failure_reason = "no improvement"
 
         # Retry first
         elif state.search_retry_count < MAX_SEARCH_RETRIES:
             decision = "retry"
             state.search_retry_count += 1
 
-            if failed_steps == total_steps:
+            if all_failed:
                 state.failure_reason = "all steps failed"
-            else:
+            elif low_confidence:
                 state.failure_reason = "low confidence"
+            else:
+                state.failure_reason = "partial failure"
 
         # Then replan
         elif state.replan_count < MAX_REPLANS:

@@ -1,73 +1,61 @@
-You are a deterministic scoring policy generator for a research agent.
+You are a scoring weight generator for a research agent.
 
-Task: assign weights for ranking sources.
+Your task is to assign weights for ranking search results based on the query.
 
-Query: {query}
+Query:
+{query}
 
-Signals:
-- relevance: how directly content answers the query (must be highest or equal-highest)
-- recency: how recent/up-to-date the information is
-- domain: source credibility (research/official > established > unknown)
+
+SIGNALS:
+
+- relevance: how directly content answers the query
+- recency: importance of up-to-date information
+- domain: credibility of source (research/official > blogs > unknown)
 - depth: level of detail and completeness
 
-Guidelines:
-- time-sensitive → increase recency
-- technical/research → increase domain and depth
-- general → prioritize relevance
 
-Computation (must follow exactly):
-1. Assign initial weights based on query type
-2. Normalize → sum = 1
+GOAL:
 
-3. Apply minimum thresholds:
-   relevance ≥ 0.35
-   recency ≥ 0.15
-   domain ≥ 0.15
-   depth ≥ 0.05
-   If violated: raise to threshold and reduce others proportionally
+Return weights that reflect what matters MOST for this specific query.
 
-4. Apply max cap:
-   no weight > 0.60
-   redistribute excess proportionally
 
-5. Normalize again → sum = exactly 1
+GUIDELINES:
 
-6. Ensure relevance is highest or tied highest
+- If query is time-sensitive (latest, recent, trends) → increase recency
+- If query is technical or research-heavy → increase domain and depth
+- If query is comparison or factual → increase relevance
+- If query needs deep explanation → increase depth
 
-7. Final validation:
-   all values ∈ [0,1], sum = 1, all keys present
 
-Fallback (if uncertain):
+IMPORTANT RULES:
+
+- relevance should usually be highest, but NOT always fixed
+- weights MUST vary depending on the query
+- DO NOT return fixed or repeated patterns
+- DO NOT copy previous outputs
+- Ensure meaningful differences across signals
+
+
+CONSTRAINTS:
+
+- all weights must be between 0.1 and 0.6
+- sum must equal EXACTLY 1.0
+- all four keys must be present
+
+
+VALIDATION:
+
+Before returning:
+- ensure weights are not identical to common defaults
+- ensure distribution reflects query intent
+
+
+OUTPUT STRUCTURE(STRICT JSON ONLY):
+
 {
-  "relevance": 0.5,
-  "recency": 0.2,
-  "domain": 0.2,
-  "depth": 0.1,
-  "reason": "fallback"
-}
-
-Output rules:
-- return JSON only
-- keys: relevance, recency, domain, depth, reason
-- float values only
-- no extra text
-
-Examples:
-
-Query: latest AI trends
-{
-  "relevance": 0.40,
-  "recency": 0.35,
-  "domain": 0.15,
-  "depth": 0.10,
-  "reason": "time-sensitive"
-}
-
-Query: how transformers work
-{
-  "relevance": 0.45,
-  "recency": 0.15,
-  "domain": 0.20,
-  "depth": 0.20,
-  "reason": "technical"
+  "relevance": 0.0,
+  "recency": 0.0,
+  "domain": 0.0,
+  "depth": 0.0,
+  "reason": "short ONE word explanation of why weights were chosen"
 }

@@ -6,39 +6,27 @@ from models.enums import CitationStatus
 from tools.search_tool import search_tool
 from tools.scraper_tool import scrape_url
 
+from services.retrieval.dedup_service import deduplicate_results
+from services.citation.citation_service import validate_url
+
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
-
-from urllib.parse import urlparse
 
 import time
 from datetime import datetime
 
 
-def normalize_url(url: str) -> str:
-    try:
-        parsed = urlparse(url)
-        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
-    except:
-        return url
-
-
 @trace_node("searcher_node")
 def searcher_node(state: ResearchState) -> ResearchState:
-    print("Searcher Node")
 
     start_time = time.time()
 
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
 
-    # DO NOT reset citations
-    if state.citations is None:
-        state.citations = {}
-
     state.search_results = {}
 
-    # safer counter (monotonic)
+    seen_urls = set()
     citation_counter = len(state.citations)
 
     try:
@@ -48,9 +36,13 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id = step.step_id
             query = step.question
 
-            print(f"[SEARCHER NODE] Step {step_id}: {query}")
-
             raw_results = search_tool(query)
+
+            if not raw_results:
+                fallback_query = " ".join(query.split()[:6])
+                raw_results = search_tool(fallback_query)
+
+            unique_results = deduplicate_results(raw_results or [], seen_urls)
 
             structured_results = []
 
@@ -58,74 +50,58 @@ def searcher_node(state: ResearchState) -> ResearchState:
             max_scrapes = scrape_limits.get(step.priority, 1)
             scrape_count = 0
 
-            if raw_results:
-                for r in raw_results:
+            for r, norm_url in unique_results:
 
-                    url = getattr(r, "url", None)
-                    title = getattr(r, "title", "Untitled")
-                    snippet = getattr(r, "snippet", "")
+                title = getattr(r, "title", "Untitled")
+                snippet = getattr(r, "snippet", "") or title
 
-                    if not url:
-                        continue
+                citation_counter += 1
+                citation_id = f"[{citation_counter}]"
 
-                    norm_url = normalize_url(url)
+                # validate EARLY
+                try:
+                    status = validate_url(norm_url)
+                except Exception:
+                    status = CitationStatus.broken
 
-                    # GLOBAL dedup (across all steps)
-                    if norm_url in state.deduplicated_urls:
-                        continue
+                content = None
+                if scrape_count < max_scrapes:
+                    try:
+                        content = scrape_url(norm_url)
+                        scrape_count += 1
+                    except Exception:
+                        pass
 
-                    state.deduplicated_urls.add(norm_url)
+                result = SearchResult(
+                    citation_id=citation_id,
+                    url=norm_url,
+                    title=title,
+                    snippet=snippet,
+                    content=content,
+                    quality_score=0.5,
+                    relevance_score=0.5,
+                    recency_score=0.5,
+                    domain_score=0.5,
+                    depth_score=0.5,
+                    rank=1
+                )
 
-                    # stable incremental ID
-                    citation_counter += 1
-                    citation_id = f"[{citation_counter}]"
+                structured_results.append(result)
 
-                    # safe scraping
-                    content = None
-                    if scrape_count < max_scrapes:
-                        try:
-                            content = scrape_url(norm_url)
-                            scrape_count += 1
-                        except Exception as e:
-                            print(f"[SCRAPER ERROR] {norm_url}: {e}")
-
-                    if not snippet:
-                        snippet = title
-
-                    result = SearchResult(
-                        citation_id=citation_id,
-                        url=norm_url,
-                        title=title,
-                        snippet=snippet,
-                        content=content,
-
-                        quality_score=0.5,
-                        relevance_score=0.5,
-                        recency_score=0.5,
-                        domain_score=0.5,
-                        depth_score=0.5,
-                        rank=1
-                    )
-
-                    structured_results.append(result)
-
-                    # store citation safely
-                    if citation_id not in state.citations:
-                        state.citations[citation_id] = Citation(
-                            citation_id=citation_id,
-                            title=title,
-                            url=norm_url,
-                            quality_score=0.5,
-                            status=CitationStatus.valid,
-                            date_accessed=datetime.now().isoformat()
-                        )
+                # source of truth
+                state.citations[citation_id] = Citation(
+                    citation_id=citation_id,
+                    title=title,
+                    url=norm_url,
+                    quality_score=0.5,
+                    status=status,
+                    date_accessed=datetime.now().isoformat()
+                )
 
             state.search_results[step_id] = structured_results
 
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
-
-    # LOGGING
 
     log_node_execution(
         node_name="searcher_node",
@@ -140,8 +116,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id: len(results)
             for step_id, results in state.search_results.items()
         },
-        "scraping": "enabled",
-        "top_k_scraped": 3,
         "total_citations": len(state.citations)
     }
 
