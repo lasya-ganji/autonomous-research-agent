@@ -1,6 +1,6 @@
 from typing import List
 from models.search_models import SearchResult
-from retrieval.embedding_service import get_embedding
+from services.retrieval.embedding_service import get_embedding
 import numpy as np
 
 
