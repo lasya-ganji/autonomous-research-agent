@@ -51,6 +51,7 @@ class ResearchState(BaseModel):
 
     # Track which citations are used in synthesis/report
     used_citation_ids: Set[str] = Field(default_factory=set)
+    citation_mapping: Dict[str, str] = {}
 
     # BUDGET / CACHING
     token_usage: int = Field(default=0, ge=0)
