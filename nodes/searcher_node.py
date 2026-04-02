@@ -1,4 +1,4 @@
-from models.state import ResearchState
+from models.state import ResearchState 
 from models.search_models import SearchResult
 from models.citation_models import Citation
 from models.enums import CitationStatus
@@ -6,12 +6,17 @@ from models.enums import CitationStatus
 from tools.search_tool import search_tool
 from tools.scraper_tool import scrape_url
 
-from services.retrieval.dedup_service import deduplicate_results
+from services.retrieval.dedup_service import (
+    deduplicate_pipeline,
+    normalize_url
+)
 from services.citation.citation_service import validate_url
+from services.retrieval.embedding_service import get_embedding
 
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
 
+from urllib.parse import urlparse
 import time
 from datetime import datetime
 
@@ -36,21 +41,55 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id = step.step_id
             query = step.question
 
+            # 1. SEARCH
             raw_results = search_tool(query)
 
             if not raw_results:
                 fallback_query = " ".join(query.split()[:6])
                 raw_results = search_tool(fallback_query)
 
-            unique_results = deduplicate_results(raw_results or [], seen_urls)
+            raw_results = raw_results or []
 
+            # 2. DEDUP PIPELINE
+            deduped_results = deduplicate_pipeline(
+                raw_results,
+                embedding_fn=get_embedding
+            )
+
+            unique_results = []
+
+            domain_count = {}
+            MAX_PER_DOMAIN = 2
+
+            for r in deduped_results:
+                url = str(getattr(r, "url", ""))
+                if not url:
+                    continue
+
+                norm_url = normalize_url(url)
+                domain = urlparse(norm_url).netloc  # FIXED
+
+                if domain_count.get(domain, 0) >= MAX_PER_DOMAIN:
+                    continue
+
+                if norm_url in seen_urls:
+                    continue
+
+                seen_urls.add(norm_url)
+                domain_count[domain] = domain_count.get(domain, 0) + 1
+
+                unique_results.append((r, norm_url))
+
+            # LIMIT RESULTS (IMPORTANT)
+            MAX_RESULTS_PER_STEP = 5
+            unique_results = unique_results[:MAX_RESULTS_PER_STEP]
+
+            # 3. STRUCTURE RESULTS
             structured_results = []
 
-            scrape_limits = {1: 3, 2: 2, 3: 1}
-            max_scrapes = scrape_limits.get(step.priority, 1)
-            scrape_count = 0
+            MAX_SCRAPES = 3
 
-            for r, norm_url in unique_results:
+            for i, (r, norm_url) in enumerate(unique_results):
 
                 title = getattr(r, "title", "Untitled")
                 snippet = getattr(r, "snippet", "") or title
@@ -58,21 +97,21 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 citation_counter += 1
                 citation_id = f"[{citation_counter}]"
 
-                # validate EARLY
+                # Validate URL
                 try:
                     status = validate_url(norm_url)
                 except Exception:
                     status = CitationStatus.broken
 
+                # Scraping (balanced)
                 content = None
-                if scrape_count < max_scrapes:
+                publish_date = None
+
+                if i < MAX_SCRAPES:
                     try:
                         scraped = scrape_url(norm_url)
-
                         content = scraped.get("content")
                         publish_date = scraped.get("publish_date")
-                        
-                        scrape_count += 1
                     except Exception:
                         pass
 
@@ -93,7 +132,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                 structured_results.append(result)
 
-                # source of truth
                 state.citations[citation_id] = Citation(
                     citation_id=citation_id,
                     title=title,
