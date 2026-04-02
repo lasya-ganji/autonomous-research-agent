@@ -50,45 +50,56 @@ Sentence text [id1] [id2]
 
 ---
 
-STRUCTURE (DYNAMIC — VERY IMPORTANT)
+ADAPTIVE STRUCTURING (VERY IMPORTANT)
 
-You MUST generate sections based on the QUERY intent.
+You MUST infer the intent of the query and structure the report accordingly.
 
 Guidelines:
 
+* Identify what the query is asking:
+  - factual explanation
+  - list of items
+  - comparison
+  - trends
+  - technical breakdown
+  - advantages/disadvantages
+  - entities or values
+
+* Based on this, organize claims so the answer is clear and directly useful.
+
+* DO NOT force any specific format if the claims do not support it.
+
+* If the query implies a structure (e.g., list, comparison, breakdown):
+  - arrange claims to reflect that structure clearly
+  - highlight relevant elements (names, values, categories) if present in claims
+
+* If such structure is NOT clearly supported by claims:
+  - present the best possible organized summary without inventing or restructuring facts
+
+---
+
+STRUCTURE (DYNAMIC)
+
+You MUST generate sections based on inferred intent.
+
 * Always include:
+  - Title
+  - Introduction
+  - Conclusion
 
-  * Title
-  * Introduction
-  * Conclusion
-
-* For the body:
-
-  * Create 2–4 meaningful sections based on the query
-  * Section names must be relevant to the topic
-
-Examples:
-
-* If query is comparison → include "Comparison"
-
-* If query is trends → include "Key Trends"
-
-* If query is advantages/disadvantages → include "Advantages", "Limitations"
-
-* If query is technical → include "Architecture", "Approach", "Performance"
-
-* If query is ethical → include "Ethical Considerations"
-
-* DO NOT force irrelevant sections
+* Body:
+  - Create 2–4 meaningful sections
+  - Section titles must reflect the content and query intent
+  - Avoid generic or irrelevant section names
 
 ---
 
 CLAIM DISTRIBUTION (STRICT)
 
-* Distribute claims across sections logically
+* Distribute claims logically across sections
 * Each claim must appear ONLY ONCE
 * NO duplication across sections
-* Each section should contain 1–3 claims (depending on total)
+* Maintain coherence within each section
 
 ---
 
@@ -144,11 +155,11 @@ CITATION RULES (STRICT)
 
 LOW DATA HANDLING
 
-If limited data:
+If limited or incomplete data:
 
 * Still produce structured output
-* Add in conclusion:
-  "Available data is limited; findings are based on retrieved sources."
+* Reflect limitations clearly in the conclusion
+* Do NOT fabricate missing details
 
 ---
 
@@ -169,7 +180,7 @@ Ensure:
 
 * All claims are used exactly once
 * No duplicated content
-* Sections match the query intent
+* Structure matches query intent
 * Citations are correct and aligned
 * Output is clean and readable
 
