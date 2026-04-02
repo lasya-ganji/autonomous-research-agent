@@ -1,3 +1,17 @@
+import os
+import logging
+import warnings
+
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("torch").setLevel(logging.ERROR)
+
+logging.basicConfig(level=logging.ERROR)
+
+warnings.filterwarnings("ignore")
+
+
 import streamlit as st
 from agent_runner import run_agent
 
