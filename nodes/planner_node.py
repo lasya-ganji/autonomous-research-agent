@@ -14,7 +14,7 @@ from observability.tracing import trace_node
 
 
 @trace_node("planner_node")
-def planner_node(state: ResearchState) -> ResearchState:
+def planner_node(state: ResearchState, llm=None) -> ResearchState:
     start_time = time.time()
 
     # execution safety
@@ -47,7 +47,10 @@ def planner_node(state: ResearchState) -> ResearchState:
             failure_reason=""
         )
 
-    response = call_llm(prompt=prompt, temperature=0)
+    if llm:
+        response = llm.generate(prompt)
+    else:
+        response = call_llm(prompt=prompt, temperature=0)
 
     print("\n[PLANNER RESPONSE RAW]:", response)
 

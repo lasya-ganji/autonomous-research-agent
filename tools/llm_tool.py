@@ -1,22 +1,37 @@
 import os
 import json
-import re
-from openai import OpenAI
 from dotenv import load_dotenv
+from langchain.chat_models import ChatOpenAI
+from langsmith import LangSmithTracer
 
 # Load environment variables
 load_dotenv()
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Create a global LangSmith tracer
+tracer = LangSmithTracer()
 
+def get_llm(model_name="gpt-4o-mini", temperature=0.2):
+    """
+    Returns a ChatOpenAI instance with LangSmith tracing enabled
+    """
+    return ChatOpenAI(
+        model_name=model_name,
+        temperature=temperature,
+        callbacks=[tracer]
+    )
 
-def call_llm(prompt: str, temperature: float = 0.2):
-    try:
-        messages = [
-            {
-                "role": "system",
-                "content": """
+def call_llm(prompt: str, llm=None, temperature: float = 0.2):
+    """
+    Call LLM with structured output and LangSmith tracing
+    """
+    if llm is None:
+        llm = get_llm(temperature=temperature)
+
+    # Create messages in the same structured format you had
+    messages = [
+        {
+            "role": "system",
+            "content": """
 You are a strict structured output generator.
 
 Follow instructions EXACTLY.
@@ -26,26 +41,19 @@ If JSON is requested:
 - Do NOT include explanations, greetings, or extra text
 - Ensure output is parseable using json.loads()
 """
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=temperature
-        )
-
-        content = response.choices[0].message.content
-
-        print("\n[LLM RAW OUTPUT]:\n", content)
-
-        return content
-
-    except Exception as e:
-        return {
-            "error": str(e)
+        },
+        {
+            "role": "user",
+            "content": prompt
         }
+    ]
+
+    # LangChain expects input differently
+    response = llm.generate([messages])
+
+    # Extract text
+    content = response.generations[0][0].text
+
+    print("\n[LLM RAW OUTPUT]:\n", content)
+
+    return content
