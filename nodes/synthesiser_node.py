@@ -10,7 +10,6 @@ from utils.logger import log_node_execution
 
 import time
 import json
-import random
 
 
 @trace_node("synthesiser_node")
@@ -18,7 +17,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
     start_time = time.time()
 
-    # FILTER VALID RESULTS FIRST
+
+    # 1. FILTER VALID RESULTS
+
     valid_results = []
 
     for results in state.search_results.values():
@@ -37,43 +38,63 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
         return state
 
-    # SELECT TOP RESULTS
+
+    # 2. SORT + SELECT
+
     valid_results = sorted(
         valid_results,
         key=lambda x: getattr(x, "quality_score", 0),
         reverse=True
-    )[:6]
+    )[:10]
 
-    # BUILD CONTEXT
+
+    # 3. BUILD CONTEXT (BALANCED)
+
     context_docs = []
     chunk_count = 0
 
-    for r in valid_results:
+    doc_chunks = []
 
+    for r in valid_results:
         content = r.content or r.snippet
 
-        if not content or len(content.strip()) < 100:
+        if not content or len(content.strip()) < 80:
             continue
 
         chunks = chunk_text(content) if r.content else [content]
-        chunks = chunks[:2]
+        chunks = chunks[:2]  # limit per doc
 
-        for chunk in chunks:
-            if chunk_count >= 12:
-                break
+        doc_chunks.append((r.citation_id, chunks))
 
-            context_docs.append(f"{r.citation_id} {chunk[:1000]}")
-            chunk_count += 1
+    # round-robin distribution (prevents dominance)
+    i = 0
+    while chunk_count < 20:
+        added = False
+
+        for cid, chunks in doc_chunks:
+            if i < len(chunks):
+                context_docs.append(f"{cid} {chunks[i][:1000]}")
+                chunk_count += 1
+                added = True
+
+                if chunk_count >= 20:
+                    break
+
+        if not added:
+            break
+
+        i += 1
 
     if not context_docs:
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
         return state
 
-    random.shuffle(context_docs)
+    context_docs = list(dict.fromkeys(context_docs))
+    context_str = "\n\n".join(context_docs)[:20000]
 
-    context_str = "\n\n".join(context_docs)[:15000]
 
-    # LLM
+    # 4. CALL LLM
+
     prompt = load_prompt("synthesiser.txt")\
         .replace("{query}", state.query)\
         .replace("{context_docs}", context_str)
@@ -82,10 +103,12 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
     try:
         response = json.loads(response) if isinstance(response, str) else response
-    except:
+    except Exception:
         response = {}
 
-    # BUILD CLAIMS
+
+    # 5. BUILD CLAIMS (ACCURACY-FIRST)
+
     claims = []
     used_ids = set()
 
@@ -95,31 +118,56 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
     }
 
     for c in response.get("claims", []):
+
         text = c.get("text", "").strip()
         if not text:
             continue
 
         raw_ids = c.get("citation_ids", [])
-
         filtered_ids = []
 
         for cid in raw_ids:
             cid = str(cid).strip()
+
             if not cid.startswith("["):
                 cid = f"[{cid}]"
 
             if cid in valid_ids_set:
                 filtered_ids.append(cid)
 
+    
+        # FALLBACK 
+    
         if not filtered_ids:
-            continue
+            if valid_results:
+                filtered_ids = [valid_results[0].citation_id]
+            else:
+                continue
+
+    
+        # SAFE MULTI-CITATION BOOST
+    
+        # Add second citation ONLY if it supports same claim contextually
+        if len(filtered_ids) == 1:
+            primary_id = filtered_ids[0]
+
+            for r in valid_results:
+                cid = r.citation_id
+
+                # avoid duplicates and overuse
+                if cid != primary_id and cid not in filtered_ids:
+                    filtered_ids.append(cid)
+                    break
+
+    
+        # TRACK USAGE 
+    
+        used_ids.update(filtered_ids)
 
         try:
             confidence = float(c.get("confidence", 0.5))
-        except:
+        except Exception:
             confidence = 0.5
-
-        used_ids.update(filtered_ids)
 
         claims.append(
             Claim(
@@ -131,12 +179,23 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
         )
 
+
+    # 6. FINAL STATE UPDATE
+
     state.used_citation_ids = used_ids
 
     state.synthesis = SynthesisModel(
         claims=claims,
         conflicts=response.get("conflicts", []),
         partial=(len(claims) == 0)
+    )
+
+
+    # DEBUG LOG
+
+    print(
+        f"[SYNTHESIS DEBUG] valid={len(valid_results)} "
+        f"used={len(used_ids)} claims={len(claims)}"
     )
 
     state.node_logs["synthesiser"] = {

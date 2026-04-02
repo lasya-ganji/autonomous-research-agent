@@ -35,10 +35,10 @@ CORE RULES (STRICT)
 
 TASK
 
-Generate 4–6 high-quality claims that:
+Generate 6–8 high-quality claims that:
 
 - Directly answer the query
-- Cover different aspects (benefits, drawbacks, trends, comparisons, etc.)
+- Cover DIFFERENT aspects (benefits, drawbacks, trends, comparisons, etc.)
 - Are specific, factual, and non-redundant
 - Use concrete insights (numbers, findings, effects when available)
 
@@ -51,6 +51,16 @@ CITATION RULES (CRITICAL)
 - DO NOT modify, rename, or invent citation_ids
 - Prefer MULTIPLE citations when the same insight appears across documents
 - If a claim cannot be grounded → DO NOT include it
+
+--------------------------------------------------
+
+DIVERSITY & COVERAGE (VERY IMPORTANT)
+
+- Use a DIVERSE set of citation_ids across claims
+- Avoid relying on the same citation repeatedly
+- Prefer covering MORE unique sources instead of repeating one source
+- If multiple valid sources exist, distribute them across different claims
+- Each claim should ideally introduce NEW supporting evidence when possible
 
 --------------------------------------------------
 
