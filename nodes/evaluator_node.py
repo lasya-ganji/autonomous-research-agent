@@ -9,15 +9,15 @@ from utils.logger import log_node_execution
 
 import time
 
-# CONFIG 
+# CONFIG
 
-THRESHOLD = 0.4
-LOW_CONF_THRESHOLD = 0.3
+THRESHOLD = 0.6
+LOW_CONF_THRESHOLD = 0.35
 
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
 
-CONFIDENCE_IMPROVEMENT_EPS = 0.02  # loop detection
+CONFIDENCE_IMPROVEMENT_EPS = 0.02
 
 
 @trace_node("evaluator_node")
@@ -39,8 +39,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     failed_steps = 0
     total_confidence = 0.0
 
-    # STEP EVALUATION
-
+    # evaluate each step independently
     for step in state.research_plan:
         step_id = step.step_id
         query = step.question
@@ -54,21 +53,42 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             failure_reason = "no results"
 
         else:
+            # scoring 
             scored_results = score_results(results, query)
             state.search_results[step_id] = scored_results
+            
+            for r in scored_results:
+                print({
+                    "title": r.title[:50],
+                    "relevance": r.relevance_score,
+                    "domain": r.domain_score,
+                    "recency": r.recency_score,
+                    "depth": r.depth_score,
+                    "quality": r.quality_score
+                })
 
             if not scored_results:
                 failure_reason = "all results filtered"
 
             else:
-                confidence = compute_confidence(scored_results)
-                passed = confidence >= THRESHOLD
+                # confidence (embedding-based)
+                confidence = max(0.0, min(compute_confidence(scored_results,query), 1.0))
 
-                if not passed:
-                    if confidence < LOW_CONF_THRESHOLD:
-                        failure_reason = "very low confidence"
-                    else:
-                        failure_reason = "low confidence"
+                # quality guard: ensure top result is meaningful
+                top_quality = scored_results[0].quality_score
+
+                if top_quality < 0.35:
+                    confidence = 0.0
+                    passed = False
+                    failure_reason = "low quality results"
+                else:
+                    passed = confidence >= THRESHOLD
+
+                    if not passed:
+                        if confidence < LOW_CONF_THRESHOLD:
+                            failure_reason = "very low confidence"
+                        else:
+                            failure_reason = "low confidence"
 
         total_confidence += confidence
 
@@ -87,20 +107,17 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     total_steps = len(step_evaluations)
     avg_confidence = total_confidence / total_steps if total_steps else 0.0
 
-    # LOOP / STAGNATION DETECTION
-
+    # loop / stagnation detection
     prev_conf = state.overall_confidence or 0.0
-
-    # improvement must be positive AND meaningful
     improvement = avg_confidence - prev_conf
 
-    no_improvement = improvement <= CONFIDENCE_IMPROVEMENT_EPS
+    # use absolute change to avoid small fluctuations from embeddings
+    no_improvement = abs(improvement) <= CONFIDENCE_IMPROVEMENT_EPS
 
     low_confidence = avg_confidence < THRESHOLD
     all_failed = failed_steps == total_steps and total_steps > 0
-    
-    # DECISION LOGIC (FINAL)
 
+    # decision logic
     if total_steps == 0:
         decision = "replan"
         state.failure_reason = "no steps evaluated"
@@ -110,12 +127,12 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         state.failure_reason = ""
 
     else:
-        # STOP LOOP if no improvement
+        # stop loop if no meaningful improvement
         if no_improvement:
             decision = "proceed"
             state.failure_reason = "no improvement"
 
-        # Retry first
+        # retry search first
         elif state.search_retry_count < MAX_SEARCH_RETRIES:
             decision = "retry"
             state.search_retry_count += 1
@@ -127,36 +144,33 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             else:
                 state.failure_reason = "partial failure"
 
-        # Then replan
+        # then replan
         elif state.replan_count < MAX_REPLANS:
             decision = "replan"
             state.replan_count += 1
             state.failure_reason = "retry exhausted"
 
-        # Final fallback (partial output)
+        # fallback to partial output
         else:
             decision = "proceed"
             state.failure_reason = "max retries reached"
 
-    # STORE RESULTS
-
+    # store evaluation result
     state.evaluation = EvaluationResult(
         steps=step_evaluations,
         decision=decision
     )
 
     state.overall_confidence = avg_confidence
-    
-    # PROPAGATE SCORES TO CITATIONS
+
+    # propagate quality scores to citations
     for results in state.search_results.values():
         for r in results:
             cid = getattr(r, "citation_id", None)
-
             if cid and cid in state.citations:
                 state.citations[cid].quality_score = round(r.quality_score, 3)
 
-    # DEBUG LOGS (UI)
-
+    # debug logs
     state.node_logs["evaluator"] = {
         "decision": decision,
         "avg_confidence": avg_confidence,
@@ -174,8 +188,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         ]
     }
 
-    # LOGGER
-
+    # structured logging
     output_data = {
         "decision": decision,
         "avg_confidence": avg_confidence,

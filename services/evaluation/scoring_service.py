@@ -4,6 +4,9 @@ from services.evaluation.weight_service import get_dynamic_weights
 from urllib.parse import urlparse
 from datetime import datetime
 import re
+import math
+import numpy as np
+from services.retrieval.embedding_service import get_embedding
 
 
 DEFAULT_WEIGHTS = {
@@ -22,10 +25,7 @@ MIN_THRESHOLDS = {
 }
 
 
-# WEIGHT VALIDATION (SOFT)
-
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
-
     if not weights:
         return DEFAULT_WEIGHTS
 
@@ -41,109 +41,202 @@ def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-# RELEVANCE (STRONG FALLBACK)
+def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float:
+    title = (result.title or "")
+    snippet = (result.snippet or "")
+    content = (result.content or "")
 
-def compute_relevance(result: SearchResult, query: str) -> float:
+    doc_text = f"{title} {snippet} {content}".strip().lower()
+    query = query.strip().lower()
 
-    query_words = set(query.lower().split())
+    if not doc_text or not query:
+        return 0.0
 
-    title = (result.title or "").lower()
-    snippet = (result.snippet or "").lower()
-    content = (result.content or "").lower()
+    # BM25-style keyword score
+    query_terms = query.split()
+    doc_terms = doc_text.split()
 
-    combined = f"{title} {snippet} {content}"
-    words = set(combined.split())
+    doc_len = len(doc_terms) or 1
+    avg_doc_len = max(doc_len, 100)
 
-    # keyword overlap
-    keyword = len(query_words & words) / (len(query_words) or 1)
+    k1 = 1.5
+    b = 0.75
 
-    # title match
-    title_words = set(title.split())
+    term_freq = {}
+    for word in doc_terms:
+        term_freq[word] = term_freq.get(word, 0) + 1
+
+    bm25_score = 0.0
+
+    for term in query_terms:
+        tf = term_freq.get(term, 0)
+        if tf == 0:
+            continue
+
+        idf = math.log(1 + (1 / (1 + tf)))
+        denom = tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
+        bm25_score += idf * ((tf * (k1 + 1)) / denom)
+
+    keyword_score = min(bm25_score / (len(query_terms) or 1), 1.0)
+
+    # semantic score
+    if query_emb is None:
+        query_emb = get_embedding(query)
+
+    doc_emb = get_embedding(doc_text[:1000])
+
+    if query_emb and doc_emb:
+        q = np.array(query_emb)
+        d = np.array(doc_emb)
+
+        denom = np.linalg.norm(q) * np.linalg.norm(d)
+        semantic_score = float(np.dot(q, d) / denom) if denom > 0 else 0.0
+        semantic_score = max(0.0, min(semantic_score, 1.0))
+    else:
+        semantic_score = 0.0
+
+    # title score
+    title_words = set(title.lower().split())
+    query_words = set(query.split())
     title_score = len(query_words & title_words) / (len(query_words) or 1)
 
-    # pseudo-semantic (important before embeddings)
-    coverage = min(len(words) / 200, 1.0)
+    base = (
+        0.6 * semantic_score +
+        0.25 * keyword_score +
+        0.15 * title_score
+    )
+    
+    base = min(1.0, base * 1.3)
 
-    base = 0.6 * keyword + 0.2 * title_score + 0.2 * coverage
-
-    # adjustment
-    if keyword > 0.6 and title_score > 0.4:
+    if semantic_score > 0.6 and keyword_score > 0.6:
         base += 0.05
 
-    return round(min(base, 1.0), 3)
+    if keyword_score > 0.7 and semantic_score < 0.3:
+        base -= 0.05
+
+    if semantic_score > 0.6 and title_score > 0.4:
+        base += 0.03
+
+    return round(max(0.0, min(base, 1.0)), 3)
 
 
-# DOMAIN
+HIGH_AUTHORITY = [
+    "ieee.org", "acm.org", "nature.com", "sciencedirect.com",
+    "springer.com", "mit.edu", "stanford.edu", "harvard.edu",
+    "nasa.gov", "who.int", "oecd.org", "worldbank.org"
+]
+
+RESEARCH_PLATFORMS = [
+    "arxiv.org", "researchgate.net", "semanticscholar.org", "pubmed.ncbi.nlm.nih.gov"
+]
+
+TRUSTED_KNOWLEDGE = [
+    "wikipedia.org", "britannica.com"
+]
+
+TECH_BLOGS = [
+    "medium.com", "towardsdatascience.com", "substack.com", "hashnode.dev"
+]
+
+NEWS_SOURCES = [
+    "bbc.com", "nytimes.com", "reuters.com", "theguardian.com"
+]
+
+LOW_QUALITY = [
+    "quora.com", "reddit.com", "pinterest.com"
+]
+
 
 def compute_domain(result: SearchResult) -> float:
-
     try:
         domain = urlparse(str(result.url)).netloc.lower()
 
-        if any(x in domain for x in ["gov", "edu", "oecd", "acm", "ieee"]):
+        # remove www
+        domain = domain.replace("www.", "")
+
+        # HIGH AUTHORITY
+        if any(d in domain for d in HIGH_AUTHORITY):
             return 0.95
 
-        if any(x in domain for x in ["google", "openai", "mit", "harvard"]):
+        # RESEARCH
+        if any(d in domain for d in RESEARCH_PLATFORMS):
             return 0.9
 
-        if "wikipedia" in domain:
+        # GOV / EDU fallback
+        if domain.endswith(".gov") or domain.endswith(".edu"):
+            return 0.93
+
+        # TRUSTED KNOWLEDGE
+        if any(d in domain for d in TRUSTED_KNOWLEDGE):
+            return 0.85
+
+        # NEWS
+        if any(d in domain for d in NEWS_SOURCES):
             return 0.8
 
-        if any(x in domain for x in ["medium", "blog"]):
+        # TECH BLOGS
+        if any(d in domain for d in TECH_BLOGS):
+            return 0.7
+
+        # LOW QUALITY
+        if any(d in domain for d in LOW_QUALITY):
+            return 0.5
+
+        # Heuristic fallback (IMPORTANT)
+        if any(x in domain for x in ["blog", "dev", "tech"]):
             return 0.65
 
-        return 0.7
+        return 0.75  
 
     except:
         return 0.5
 
 
-# RECENCY
-
 def compute_recency(result: SearchResult, weight: float) -> float:
+    today = datetime.now()
+    days_old = None
 
-    current_year = datetime.now().year
-
-    # 1. PRIMARY: USE METADATA
     if getattr(result, "publish_date", None):
         try:
-            year = int(str(result.publish_date)[:4])
-            gap = current_year - year
-        except:
-            gap = None
-    else:
-        gap = None
+            pub_date = result.publish_date
+            if isinstance(pub_date, str):
+                pub_date = datetime.fromisoformat(pub_date[:10])
 
-    # 2. FALLBACK: REGEX (TEXT)
-    if gap is None:
+            days_old = (today - pub_date).days
+        except:
+            days_old = None
+
+    if days_old is None:
         text = f"{result.title or ''} {result.snippet or ''}"
         years = re.findall(r"(20\d{2})", text)
-
         if years:
-            latest = max(map(int, years))
-            gap = current_year - latest
+            latest_year = max(map(int, years))
+            days_old = (today.year - latest_year) * 365
 
-    # 3. DEFAULT (NO INFO)
-    if gap is None:
+    if days_old is None:
         return 0.5
 
-    # 4. SCORING
-    if gap <= 1:
-        return 1.0
-    elif gap <= 2:
-        return 0.8
-    elif gap <= 3:
-        return 0.6
+    # adaptive max_days
+    if weight >= 0.3:
+        max_days = 365      # highly time-sensitive
+    elif weight >= 0.25:
+        max_days = 730      # moderately time-sensitive
+    elif weight >= 0.2:
+        max_days = 1200     # semi-static topics
     else:
-        return 0.3
+        max_days = 2000     # evergreen topics
 
+    # exponential decay 
+    recency = math.exp(-days_old / max_days)
 
-# DEPTH
+    # prevent over-penalizing older but valid sources
+    recency = max(0.2, recency)
+
+    return round(recency, 3)
+
 
 def compute_depth(result: SearchResult) -> float:
-
     text = result.content or result.snippet or ""
-
     wc = len(text.split())
 
     if wc > 1200:
@@ -156,16 +249,12 @@ def compute_depth(result: SearchResult) -> float:
         return 0.3
 
 
-# HARD FILTER
-
 def is_outdated(result: SearchResult, recency_weight: float) -> bool:
-
     if recency_weight < 0.30:
         return False
 
     current_year = datetime.now().year
 
-    # 1. Try metadata
     if getattr(result, "publish_date", None):
         try:
             year = int(str(result.publish_date)[:4])
@@ -173,7 +262,6 @@ def is_outdated(result: SearchResult, recency_weight: float) -> bool:
         except:
             pass
 
-    # 2. Fallback regex
     text = f"{result.title or ''} {result.snippet or ''}"
     years = re.findall(r"(20\d{2})", text)
 
@@ -183,11 +271,10 @@ def is_outdated(result: SearchResult, recency_weight: float) -> bool:
 
     return False
 
-# MAIN
 
 def score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
-
     weights = validate_weights(get_dynamic_weights(query))
+    query_emb = get_embedding(query)
 
     scored = []
 
@@ -196,24 +283,31 @@ def score_results(results: List[SearchResult], query: str) -> List[SearchResult]
         if is_outdated(r, weights["recency"]):
             continue
 
-        r.relevance_score = compute_relevance(r, query)
+        r.relevance_score = compute_relevance(r, query, query_emb)
         r.domain_score = compute_domain(r)
         r.recency_score = compute_recency(r, weights["recency"])
         r.depth_score = compute_depth(r)
 
-        r.quality_score = (
-            weights["relevance"] * r.relevance_score +
+        # relevance-dominant formulation
+        # compute secondary signals
+        secondary = (
             weights["domain"] * r.domain_score +
             weights["recency"] * r.recency_score +
             weights["depth"] * r.depth_score
         )
 
+        # balanced scoring 
+        r.quality_score = (
+            0.7 * r.relevance_score +
+            0.3 * secondary
+        )
+
+        # clamp + stability
+        r.quality_score = round(max(0.2, min(r.quality_score, 1.0)), 3)
         scored.append(r)
 
-    # sort
     scored.sort(key=lambda x: x.quality_score, reverse=True)
 
-    # soft filter
     scored = [r for r in scored if r.quality_score >= 0.25]
 
     for i, r in enumerate(scored):
