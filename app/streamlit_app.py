@@ -218,7 +218,7 @@ if run_button:
         else:
             st.info("No citations available.")
 
-    # ---------------- DEBUG ----------------
+    # ---------------- ERRORS ----------------
     with tab7:
         st.subheader("Node Execution Details")
 
@@ -237,11 +237,32 @@ if run_button:
 
         errors = result.get("errors")
 
-        if errors:
+        if errors and len(errors) > 0:
+
+            st.error(f"{len(errors)} errors detected")
+
             for err in errors:
-                try:
-                    st.error(f"[{err.severity}] {err.node} → {err.message}")
-                except Exception:
-                    st.error(str(err))
+
+            # 🔥 HANDLE BOTH CASES (object + dict)
+                if isinstance(err, dict):
+                    node = err.get("node")
+                    severity = err.get("severity")
+                    message = err.get("message")
+                    timestamp = err.get("timestamp")
+                    error_type = err.get("error_type")
+
+                else:
+                    node = err.node
+                    severity = err.severity
+                    message = err.message
+                    timestamp = err.timestamp
+                    error_type = err.error_type
+
+                with st.expander(f"{severity} • {node}"):
+
+                    st.write(f"**Message:** {message}")
+                    st.write(f"**Type:** {error_type}")
+                    st.write(f"**Time:** {timestamp}")
+
         else:
             st.success("No errors encountered.")
