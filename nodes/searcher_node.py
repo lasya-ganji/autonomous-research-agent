@@ -15,16 +15,15 @@ from services.retrieval.embedding_service import get_embedding
 
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
+from config.constants.node_names import NodeNames
 
 from urllib.parse import urlparse
-import time
+
 from datetime import datetime
 
 
-@trace_node("searcher_node")
+@trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
-
-    start_time = time.time()
 
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
@@ -51,11 +50,9 @@ def searcher_node(state: ResearchState) -> ResearchState:
             raw_results = raw_results or []
 
             # 2. DEDUP PIPELINE
-            deduped_results = deduplicate_pipeline(
-                raw_results,
-                embedding_fn=get_embedding
-            )
-
+            deduped_results = deduplicate_pipeline(raw_results)
+            
+            
             unique_results = []
 
             domain_count = {}
@@ -149,11 +146,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
-        output_data={k: len(v) for k, v in state.search_results.items()},
-        start_time=start_time
+        output_data={k: len(v) for k, v in state.search_results.items()}
     )
 
-    state.node_logs["searcher"] = {
+    state.node_logs[NodeNames.SEARCHER] = {
         "total_steps": len(state.research_plan),
         "results_per_step": {
             step_id: len(results)

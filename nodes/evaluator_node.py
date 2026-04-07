@@ -6,8 +6,8 @@ from services.evaluation.confidence_service import compute_confidence
 
 from observability.tracing import trace_node
 from utils.logger import log_node_execution
+from config.constants.node_names import NodeNames
 
-import time
 
 # CONFIG
 
@@ -20,13 +20,12 @@ MAX_REPLANS = 1
 CONFIDENCE_IMPROVEMENT_EPS = 0.02
 
 
-@trace_node("evaluator_node")
+@trace_node(NodeNames.EVALUATOR)
 def evaluator_node(state: ResearchState) -> ResearchState:
 
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
 
-    start_time = time.time()
 
     input_data = {
         "num_steps": len(state.research_plan),
@@ -171,7 +170,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 state.citations[cid].quality_score = round(r.quality_score, 3)
 
     # debug logs
-    state.node_logs["evaluator"] = {
+    state.node_logs[NodeNames.EVALUATOR] = {
         "decision": decision,
         "avg_confidence": avg_confidence,
         "failed_steps": failed_steps,
@@ -195,7 +194,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         "failed_steps": failed_steps
     }
 
-    log_node_execution("evaluator", input_data, output_data, start_time)
+    log_node_execution("evaluator", input_data, output_data)
 
     state.node_execution_count += 1
 

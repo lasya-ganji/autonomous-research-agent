@@ -1,6 +1,5 @@
 from typing import List
 from datetime import datetime, timezone
-import time
 import json
 
 from models.state import ResearchState
@@ -11,11 +10,11 @@ from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
+from config.constants.node_names import NodeNames
 
 
-@trace_node("planner_node")
+@trace_node(NodeNames.PLANNER)
 def planner_node(state: ResearchState) -> ResearchState:
-    start_time = time.time()
 
     # execution safety
     if state.node_execution_count >= 12:
@@ -136,13 +135,12 @@ def planner_node(state: ResearchState) -> ResearchState:
     log_node_execution(
         node_name="planner_node",
         input_data=query,
-        output_data=[step.model_dump() for step in plan],
-        start_time=start_time
+        output_data=[step.model_dump() for step in plan]
     )
     if state.node_logs is None:
         state.node_logs = {}
 
-    state.node_logs["planner"] = {
+    state.node_logs[NodeNames.PLANNER] = {
         "num_steps": len(state.research_plan),
         "questions": [step.question for step in state.research_plan]
     }
