@@ -58,8 +58,13 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
         # UPDATED LLM CALL
         res = llm_fn(prompt=prompt, temperature=0)
 
-        response = res.get("content", "")
-        usage = res.get("usage", {})
+        # ✅ HANDLE BOTH REAL + MOCK
+        if isinstance(res, dict):
+            response = res.get("content", "")
+            usage = res.get("usage", {})
+        else:
+            response = res   # mock returns directly
+            usage = {}
 
         print("\n[PLANNER RESPONSE RAW]:", response)
 

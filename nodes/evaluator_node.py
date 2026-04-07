@@ -73,7 +73,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             else:
                 # SCORING
                 try:
-                    scored_results = score_results(results, query)
+                    scored_results = score_results(results, query, state)
                     state.search_results[step_id] = scored_results
                 except Exception as e:
                     state.errors.append(

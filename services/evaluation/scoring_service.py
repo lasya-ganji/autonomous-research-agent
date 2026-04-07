@@ -272,8 +272,8 @@ def is_outdated(result: SearchResult, recency_weight: float) -> bool:
     return False
 
 
-def score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
-    weights = validate_weights(get_dynamic_weights(query))
+def score_results(results: List[SearchResult], query: str, state=None) -> List[SearchResult]:
+    weights = validate_weights(get_dynamic_weights(query,state))
     query_emb = get_embedding(query)
 
     scored = []

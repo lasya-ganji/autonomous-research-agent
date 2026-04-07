@@ -1,6 +1,7 @@
 from typing import Dict
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
+from services.system.cost_tracker import calculate_cost   # ✅ ADD THIS
 import json
 
 
@@ -14,7 +15,7 @@ DEFAULT_WEIGHTS = {
 REQUIRED_KEYS = {"relevance", "recency", "domain", "depth"}
 
 
-# VALIDATION HELPERS
+# ---------------- VALIDATION HELPERS ---------------- #
 
 def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
     total = sum(weights.values()) or 1
@@ -22,16 +23,13 @@ def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
 
 
 def _apply_constraints(weights: Dict[str, float]) -> Dict[str, float]:
-    # minimum thresholds 
     weights["relevance"] = max(weights["relevance"], 0.35)
     weights["recency"] = max(weights["recency"], 0.15)
     weights["domain"] = max(weights["domain"], 0.15)
     weights["depth"] = max(weights["depth"], 0.05)
 
-    # max cap (dominance control)
     weights = {k: min(v, 0.6) for k, v in weights.items()}
 
-    # normalize again
     return _normalize(weights)
 
 
@@ -48,16 +46,37 @@ def _is_valid(weights: Dict[str, float]) -> bool:
     return True
 
 
-# MAIN FUNCTION
+# ---------------- MAIN FUNCTION ---------------- #
 
-def get_dynamic_weights(query: str) -> Dict[str, float]:
+def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
     prompt_template = load_prompt("evaluator_weights.txt")
     prompt = prompt_template.replace("{query}", query)
 
     try:
-        response = call_llm(prompt)
+        # ✅ CALL LLM
+        res = call_llm(prompt)
 
-        # safe JSON parsing
+        response = res.get("content", "")
+        usage = res.get("usage", {})
+
+        # ---------------- TOKEN + COST TRACKING ---------------- #
+        if state and usage:
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+
+            # Tokens
+            state.total_tokens += usage.get("total_tokens", 0)
+
+            # Cost
+            cost = calculate_cost(prompt_tokens, completion_tokens)
+            state.total_cost += cost
+
+            # 🚨 COST GUARDRAIL
+            if state.total_cost > state.cost_limit:
+                state.abort = True
+                return DEFAULT_WEIGHTS
+
+        # ---------------- JSON PARSE ---------------- #
         try:
             data = json.loads(response)
         except Exception:
@@ -71,9 +90,7 @@ def get_dynamic_weights(query: str) -> Dict[str, float]:
         if not _is_valid(weights):
             return DEFAULT_WEIGHTS
 
-        # normalize
         weights = _normalize(weights)
-
         weights = _apply_constraints(weights)
 
         return weights
