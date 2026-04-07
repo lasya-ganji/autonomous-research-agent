@@ -6,6 +6,7 @@ from datetime import datetime
 import re
 import math
 import numpy as np
+from collections import Counter
 from services.retrieval.embedding_service import get_embedding
 
 
@@ -52,72 +53,65 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
     if not doc_text or not query:
         return 0.0
 
-    # BM25-style keyword score
     query_terms = query.split()
     doc_terms = doc_text.split()
 
-    doc_len = len(doc_terms) or 1
-    avg_doc_len = max(doc_len, 100)
+    # KEYWORD SCORE (IMPROVED)
+    doc_tf = Counter(doc_terms)
 
-    k1 = 1.5
-    b = 0.75
-
-    term_freq = {}
-    for word in doc_terms:
-        term_freq[word] = term_freq.get(word, 0) + 1
-
-    bm25_score = 0.0
-
+    keyword_score = 0.0
     for term in query_terms:
-        tf = term_freq.get(term, 0)
-        if tf == 0:
-            continue
+        if term in doc_tf:
+            # controlled TF boost (avoid explosion)
+            keyword_score += min(doc_tf[term] / 3, 1.0)
 
-        idf = math.log(1 + (1 / (1 + tf)))
-        denom = tf + k1 * (1 - b + b * (doc_len / avg_doc_len))
-        bm25_score += idf * ((tf * (k1 + 1)) / denom)
+    keyword_score = keyword_score / (len(query_terms) or 1)
 
-    keyword_score = min(bm25_score / (len(query_terms) or 1), 1.0)
-
-    # semantic score
+    # SEMANTIC SCORE
     if query_emb is None:
         query_emb = get_embedding(query)
 
     doc_emb = get_embedding(doc_text[:1000])
 
-    if query_emb and doc_emb:
+    if query_emb is not None and doc_emb is not None:
         q = np.array(query_emb)
         d = np.array(doc_emb)
 
         denom = np.linalg.norm(q) * np.linalg.norm(d)
         semantic_score = float(np.dot(q, d) / denom) if denom > 0 else 0.0
+
+        # normalize safely
         semantic_score = max(0.0, min(semantic_score, 1.0))
     else:
         semantic_score = 0.0
 
-    # title score
+    # TITLE MATCH SCORE
     title_words = set(title.lower().split())
-    query_words = set(query.split())
+    query_words = set(query_terms)
+
     title_score = len(query_words & title_words) / (len(query_words) or 1)
 
+    # BASE COMBINATION
     base = (
-        0.6 * semantic_score +
+        0.65 * semantic_score +
         0.25 * keyword_score +
-        0.15 * title_score
+        0.10 * title_score
     )
-    
-    base = min(1.0, base * 1.3)
 
-    if semantic_score > 0.6 and keyword_score > 0.6:
+    # CONTROLLED BOOSTING
+    if semantic_score > 0.6 and keyword_score > 0.5:
         base += 0.05
-
-    if keyword_score > 0.7 and semantic_score < 0.3:
-        base -= 0.05
 
     if semantic_score > 0.6 and title_score > 0.4:
         base += 0.03
 
-    return round(max(0.0, min(base, 1.0)), 3)
+    if keyword_score > 0.7 and semantic_score < 0.3:
+        base -= 0.05
+
+    # FINAL NORMALIZATION
+    base = max(0.0, min(base, 1.0))
+
+    return round(base, 3)
 
 
 HIGH_AUTHORITY = [
@@ -192,45 +186,67 @@ def compute_domain(result: SearchResult) -> float:
         return 0.5
 
 
+
 def compute_recency(result: SearchResult, weight: float) -> float:
     today = datetime.now()
     days_old = None
 
+    # 1. Extract publish date
     if getattr(result, "publish_date", None):
         try:
             pub_date = result.publish_date
+
             if isinstance(pub_date, str):
                 pub_date = datetime.fromisoformat(pub_date[:10])
 
-            days_old = (today - pub_date).days
-        except:
+            # FUTURE DATE GUARD
+            if pub_date > today:
+                days_old = 0
+            else:
+                days_old = (today - pub_date).days
+
+        except Exception:
             days_old = None
 
+    # 2. Fallback: extract year
     if days_old is None:
         text = f"{result.title or ''} {result.snippet or ''}"
         years = re.findall(r"(20\d{2})", text)
+
         if years:
             latest_year = max(map(int, years))
-            days_old = (today.year - latest_year) * 365
+            year_diff = today.year - latest_year
 
+            # clamp year diff
+            year_diff = max(0, min(year_diff, 20))  # max 20 years
+
+            days_old = year_diff * 365
+
+    # 3. Final fallback
     if days_old is None:
-        return 0.5
+        return 0.5  # neutral score
 
-    # adaptive max_days
+    # 4. Clamp days_old 
+    days_old = max(0, min(days_old, 3650))  # max ~10 years
+
+    # 5. Adaptive decay window
     if weight >= 0.3:
-        max_days = 365      # highly time-sensitive
+        max_days = 365       # very time-sensitive
     elif weight >= 0.25:
-        max_days = 730      # moderately time-sensitive
+        max_days = 730       # moderate
     elif weight >= 0.2:
-        max_days = 1200     # semi-static topics
+        max_days = 1200      # semi-static
     else:
-        max_days = 2000     # evergreen topics
+        max_days = 2000      # evergreen
 
-    # exponential decay 
+    # 6. Compute recency
     recency = math.exp(-days_old / max_days)
 
-    # prevent over-penalizing older but valid sources
-    recency = max(0.2, recency)
+    # 7. Smooth lower bound
+    recency = max(0.1, recency) 
+
+    # 8. Ensure valid range
+    recency = min(max(recency, 0), 1)
 
     return round(recency, 3)
 
