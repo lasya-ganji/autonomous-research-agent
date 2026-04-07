@@ -48,10 +48,13 @@ class ResearchState(BaseModel):
 
     # CITATIONS (SOURCE OF TRUTH)
     citations: Dict[str, Citation] = Field(default_factory=dict)
-
+    
     # Track which citations are used in synthesis/report
     used_citation_ids: Set[str] = Field(default_factory=set)
     citation_mapping: Dict[str, str] = {}
+    
+    citation_chunks: Dict[str, List[str]] = Field(default_factory=dict)
+
 
     # BUDGET / CACHING
     token_usage: int = Field(default=0, ge=0)

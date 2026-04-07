@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Dict
 
 class Claim(BaseModel):
     text: str
@@ -7,7 +7,8 @@ class Claim(BaseModel):
     confidence: float = Field(ge=0, le=1)
     verified: bool
     citation_confidence: float = Field(ge=0, le=1)
-
+    citation_score_map: Dict[str, float] = {}
+    hallucinated_citations: List[str] = []
 
 class Conflict(BaseModel):
     claim_a: str
