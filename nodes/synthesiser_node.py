@@ -8,6 +8,7 @@ from utils.prompt_loader import load_prompt
 from observability.tracing import trace_node
 from utils.chunking import chunk_text
 from utils.logger import log_node_execution
+from services.system.cost_tracker import calculate_cost  # ✅ NEW
 
 import time
 import json
@@ -24,7 +25,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         if state.errors is None:
             state.errors = []
 
+        # -----------------------------
         # 1. FILTER VALID RESULTS
+        # -----------------------------
         valid_results = []
 
         for results in state.search_results.values():
@@ -52,16 +55,18 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-
+        # -----------------------------
         # 2. SORT + SELECT
+        # -----------------------------
         valid_results = sorted(
             valid_results,
             key=lambda x: getattr(x, "quality_score", 0),
             reverse=True
         )[:10]
 
-
+        # -----------------------------
         # 3. BUILD CONTEXT
+        # -----------------------------
         context_docs = []
         chunk_count = 0
         doc_chunks = []
@@ -111,14 +116,47 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         context_docs = list(dict.fromkeys(context_docs))
         context_str = "\n\n".join(context_docs)[:20000]
 
-
-        # 4. CALL LLM
+        # -----------------------------
+        # 4. CALL LLM (UPDATED)
+        # -----------------------------
         prompt = load_prompt("synthesiser.txt")\
             .replace("{query}", state.query)\
             .replace("{context_docs}", context_str)
 
-        response = call_llm(prompt=prompt, temperature=0)
+        res = call_llm(prompt=prompt, temperature=0)
 
+        response = res.get("content", "")
+        usage = res.get("usage", {})
+
+        # ✅ TOKEN TRACKING
+        state.total_tokens += usage.get("total_tokens", 0)
+
+        # ✅ COST TRACKING
+        cost = calculate_cost(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0)
+        )
+        state.total_cost += cost
+
+        # 🚨 COST GUARDRAIL
+        if state.total_cost > state.cost_limit:
+            state.abort = True
+
+            state.errors.append(
+                ErrorLog(
+                    node="synthesiser_node",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    severity=SeverityEnum.CRITICAL,
+                    error_type=ErrorTypeEnum.timeout,
+                    message=f"Cost exceeded limit: ₹{state.total_cost}"
+                )
+            )
+
+            return state
+
+        # -----------------------------
+        # PARSE JSON
+        # -----------------------------
         try:
             response = json.loads(response) if isinstance(response, str) else response
         except Exception as e:
@@ -133,8 +171,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
             response = {}
 
-
+        # -----------------------------
         # 5. BUILD CLAIMS
+        # -----------------------------
         claims = []
         used_ids = set()
 
@@ -161,14 +200,12 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
-                # fallback
                 if not filtered_ids:
                     if valid_results:
                         filtered_ids = [valid_results[0].citation_id]
                     else:
                         continue
 
-                # add second citation (optional)
                 if len(filtered_ids) == 1:
                     primary_id = filtered_ids[0]
 
@@ -206,8 +243,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     )
                 )
 
-
-        # 6. FINAL STATE
+        # -----------------------------
+        # FINAL STATE
+        # -----------------------------
         state.used_citation_ids = used_ids
 
         state.synthesis = SynthesisModel(

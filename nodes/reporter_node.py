@@ -7,8 +7,8 @@ from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from observability.tracing import trace_node
-
 from utils.logger import log_node_execution
+from services.system.cost_tracker import calculate_cost  # ✅ NEW
 
 import time
 
@@ -18,7 +18,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
     start_time = time.time()
 
-    # ✅ safety init
+    # safety init
     if state.errors is None:
         state.errors = []
 
@@ -118,14 +118,43 @@ def reporter_node(state: ResearchState) -> ResearchState:
             ]
         )
 
-        # LLM
+        # LLM CALL
         try:
             prompt = load_prompt("reporter.txt")\
                 .replace("{query}", state.query)\
                 .replace("{synthesis}", synthesis_text)\
                 .replace("{citations}", citations_text)
 
-            response = call_llm(prompt=prompt, temperature=0.2)
+            res = call_llm(prompt=prompt, temperature=0.2)
+
+            response = res.get("content", "")
+            usage = res.get("usage", {})
+
+            # TOKEN TRACKING
+            state.total_tokens += usage.get("total_tokens", 0)
+
+            # COST TRACKING
+            cost = calculate_cost(
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0)
+            )
+            state.total_cost += cost
+
+            # COST GUARDRAIL
+            if state.total_cost > state.cost_limit:
+                state.abort = True
+
+                state.errors.append(
+                    ErrorLog(
+                        node="reporter_node",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        severity=SeverityEnum.CRITICAL,
+                        error_type=ErrorTypeEnum.timeout,
+                        message=f"Cost exceeded limit: ₹{state.total_cost}"
+                    )
+                )
+
+                return state
 
         except Exception as e:
             state.errors.append(
@@ -151,13 +180,17 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 "query": state.query,
                 "timestamp": datetime.now().isoformat(),
                 "model": "llm",
-                "errors": [e.model_dump() for e in state.errors]  # ✅ surfaced
+                "total_tokens": state.total_tokens,   
+                "total_cost": state.total_cost,       
+                "errors": [e.model_dump() for e in state.errors]
             }
         )
 
         state.node_logs["reporter"] = {
             "report_generated": True,
-            "citations_used": len(sorted_ids)
+            "citations_used": len(sorted_ids),
+            "total_tokens": state.total_tokens,   
+            "total_cost": state.total_cost       
         }
 
     except Exception as e:

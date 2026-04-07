@@ -13,6 +13,8 @@ from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
 
+from services.system.cost_tracker import calculate_cost
+
 
 @trace_node("planner_node")
 def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
@@ -23,7 +25,6 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
         if state.errors is None:
             state.errors = []
 
-        # Execution safety
         if state.node_execution_count >= 12:
             raise Exception("Max node execution limit reached")
 
@@ -54,10 +55,39 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
                 failure_reason=""
             )
 
-        # Call LLM (injectable)
-        response = llm_fn(prompt=prompt, temperature=0)
+        # UPDATED LLM CALL
+        res = llm_fn(prompt=prompt, temperature=0)
+
+        response = res.get("content", "")
+        usage = res.get("usage", {})
 
         print("\n[PLANNER RESPONSE RAW]:", response)
+
+        # TOKEN TRACKING
+        state.total_tokens += usage.get("total_tokens", 0)
+
+        # COST TRACKING
+        cost = calculate_cost(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0)
+        )
+        state.total_cost += cost
+
+        # COST GUARDRAIL
+        if state.total_cost > state.cost_limit:
+            state.abort = True
+
+            state.errors.append(
+                ErrorLog(
+                    node="planner_node",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    severity=SeverityEnum.CRITICAL,
+                    error_type=ErrorTypeEnum.timeout,
+                    message=f"Cost exceeded limit: ₹{state.total_cost}"
+                )
+            )
+
+            return state
 
         # Parse JSON
         if isinstance(response, str):
@@ -136,7 +166,6 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
                 )
             )
 
-    # ✅ FIX: Ensure valid question length
             fallback_question = query.strip()
 
             if len(fallback_question) < 5:
@@ -150,10 +179,9 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
                 )
             ]
 
-        # Sort + limit
+        # Sort and limit
         plan = sorted(plan, key=lambda x: x.priority)[:3]
 
-        # Reassign IDs
         for idx, step in enumerate(plan, start=1):
             step.step_id = idx
 

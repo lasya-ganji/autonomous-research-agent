@@ -29,7 +29,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     start_time = time.time()
 
     try:
-        # ✅ ensure errors list exists
+        # ensure errors list exists
         if state.errors is None:
             state.errors = []
 
@@ -47,9 +47,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         failed_steps = 0
         total_confidence = 0.0
 
-        # -----------------------------
         # STEP EVALUATION LOOP
-        # -----------------------------
         for step in state.research_plan:
             step_id = step.step_id
             query = step.question
@@ -73,9 +71,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 )
 
             else:
-                # -----------------------------
                 # SCORING
-                # -----------------------------
                 try:
                     scored_results = score_results(results, query)
                     state.search_results[step_id] = scored_results
@@ -95,9 +91,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                     failure_reason = "all results filtered"
 
                 else:
-                    # -----------------------------
                     # CONFIDENCE
-                    # -----------------------------
                     try:
                         confidence = max(
                             0.0,
@@ -145,9 +139,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 )
             )
 
-        # -----------------------------
         # AGGREGATION
-        # -----------------------------
         total_steps = len(step_evaluations)
         avg_confidence = total_confidence / total_steps if total_steps else 0.0
 
@@ -158,9 +150,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         low_confidence = avg_confidence < THRESHOLD
         all_failed = failed_steps == total_steps and total_steps > 0
 
-        # -----------------------------
         # DECISION LOGIC
-        # -----------------------------
         if total_steps == 0:
             decision = "replan"
             state.failure_reason = "no steps evaluated"
@@ -194,9 +184,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 decision = "proceed"
                 state.failure_reason = "max retries reached"
 
-        # -----------------------------
         # STORE RESULT
-        # -----------------------------
         state.evaluation = EvaluationResult(
             steps=step_evaluations,
             decision=decision
@@ -204,18 +192,14 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
         state.overall_confidence = avg_confidence
 
-        # -----------------------------
         # PROPAGATE QUALITY
-        # -----------------------------
         for results in state.search_results.values():
             for r in results:
                 cid = getattr(r, "citation_id", None)
                 if cid and cid in state.citations:
                     state.citations[cid].quality_score = round(r.quality_score, 3)
 
-        # -----------------------------
         # DEBUG LOGS
-        # -----------------------------
         state.node_logs["evaluator"] = {
             "decision": decision,
             "avg_confidence": avg_confidence,
@@ -237,9 +221,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
         return state
 
-    # -----------------------------
     # GLOBAL ERROR CATCH
-    # -----------------------------
     except Exception as e:
         state.errors.append(
             ErrorLog(

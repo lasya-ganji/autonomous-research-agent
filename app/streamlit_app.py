@@ -233,6 +233,14 @@ if run_button:
 
         st.divider()
 
+        st.subheader("Cost & Token Usage")
+
+        st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
+        st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
+
+        if result.get("abort"):
+            st.error("⚠️ Execution stopped due to cost limit")
+
         st.subheader("Errors")
 
         errors = result.get("errors")

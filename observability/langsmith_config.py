@@ -16,4 +16,4 @@ def setup_langsmith():
     else:
         print("LangSmith API Key Loaded")
 
-    print("LangSmith tracing enabled")
+    print("LangSmith tracing enabled") 
