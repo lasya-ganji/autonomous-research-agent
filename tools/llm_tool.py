@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from langsmith import traceable
-from langsmith.run_helpers import get_current_run_tree  # ✅ NEW
+from langsmith.run_helpers import get_current_run_tree 
 
 # Load environment variables
 load_dotenv()
@@ -11,7 +11,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-@traceable(name="llm_call")  # ✅ LangSmith tracing
+@traceable(name="llm_call")  # LangSmith tracing
 def call_llm(prompt: str, temperature: float = 0.2):
     try:
         messages = [
@@ -42,10 +42,10 @@ If JSON is requested:
 
         content = response.choices[0].message.content
 
-        # ✅ Extract usage
+        # Extract usage
         usage = response.usage
 
-        # 🔥 🔥 IMPORTANT FIX: Attach usage to LangSmith
+        # IMPORTANT FIX: Attach usage to LangSmith
         run = get_current_run_tree()
         if run and usage:
             run.extra = {
