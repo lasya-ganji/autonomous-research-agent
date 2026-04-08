@@ -4,13 +4,13 @@ from functools import wraps
 
 def trace_node(node_name: str):
     """
-    Tracing decorator (PRD-aligned).
+    Tracing decorator.
 
     Goals:
     - DO NOT overwrite node debug data
     - Preserve all node-level logs
     - Attach execution metadata safely
-    - Keep duration for UI (not for debug overwrite)
+    - Keep duration for UI 
     """
 
     def decorator(func):
