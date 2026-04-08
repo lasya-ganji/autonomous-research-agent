@@ -94,7 +94,7 @@ if run_button:
         report = result.get("report")
 
         if report:
-            sections = getattr(report, "sections", [])
+            sections = safe_get(report, "sections", [])
             if sections:
                 render_report(sections[0])
             else:
@@ -178,13 +178,18 @@ if run_button:
 
         synthesis = result.get("synthesis")
 
-        if synthesis and getattr(synthesis, "claims", None):
-            for claim in synthesis.claims:
-                st.markdown(f"- {claim.text}")
+        claims = safe_get(synthesis, "claims", [])
+        if claims:
+            for claim in claims:
+                st.markdown(f"- {safe_get(claim, 'text', '')}")
 
-                citation_text = " ".join(claim.citation_ids) if claim.verified else "UNVERIFIED"
+                citation_ids = safe_get(claim, "citation_ids", []) or []
+                verified = safe_get(claim, "verified", False)
+                citation_text = " ".join(citation_ids) if verified else "UNVERIFIED"
 
-                st.caption(f"Confidence: {round(claim.confidence,2)} | Citations: {citation_text}")
+                st.caption(
+                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text}"
+                )
                 st.divider()
         else:
             st.info("No synthesis available.")
@@ -198,14 +203,13 @@ if run_button:
 
         report = result.get("report")
 
-        if report and getattr(report, "citations", None):
-
-            for c in report.citations:
-
-                cid = c.get("id")
-                title = c.get("title", "Untitled")
-                url = c.get("url", "")
-                quality = c.get("quality_score", None)
+        citations = safe_get(report, "citations", []) or []
+        if citations:
+            for c in citations:
+                cid = safe_get(c, "id")
+                title = safe_get(c, "title", "Untitled")
+                url = safe_get(c, "url", "")
+                quality = safe_get(c, "quality_score", None)
 
                 st.markdown(f"**{cid} {title}**")
                 st.caption(url)
@@ -214,21 +218,20 @@ if run_button:
                     st.caption(f"Quality: {round(quality, 3)}")
 
                 st.divider()
-
         else:
             st.info("No citations available.")
 
         st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['CITATION'])}s")
 
-
-    # ---------------- DEBUG ----------------
+    # ---------------- DEBUG / COST / ERRORS ----------------
     with tab7:
         st.subheader("Node Execution Details")
 
         if node_logs:
             for node, data in node_logs.items():
+                if node == "citation":
+                    continue  # hide test-only duplicate; keep CITATION_MANAGER for UI
                 with st.expander(f"{node} NODE"):
-
                     # REMOVE TRACE FROM DEBUG DISPLAY
                     debug_data = {k: v for k, v in data.items() if k != "_trace"}
 
@@ -242,10 +245,37 @@ if run_button:
 
         st.divider()
 
+        st.subheader("Cost & Token Usage")
+        st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
+        st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
+
+        if result.get("abort"):
+            st.error("⚠️ Execution stopped due to cost limit")
+
+        st.subheader("Errors")
         errors = result.get("errors")
 
-        if errors:
+        if errors and len(errors) > 0:
+            st.error(f"{len(errors)} errors detected")
+
             for err in errors:
-                st.error(str(err))
+                # HANDLE BOTH CASES (object + dict)
+                if isinstance(err, dict):
+                    node = err.get("node")
+                    severity = err.get("severity")
+                    message = err.get("message")
+                    timestamp = err.get("timestamp")
+                    error_type = err.get("error_type")
+                else:
+                    node = err.node
+                    severity = err.severity
+                    message = err.message
+                    timestamp = err.timestamp
+                    error_type = err.error_type
+
+                with st.expander(f"{severity} • {node}"):
+                    st.write(f"**Message:** {message}")
+                    st.write(f"**Type:** {error_type}")
+                    st.write(f"**Time:** {timestamp}")
         else:
             st.success("No errors encountered.")

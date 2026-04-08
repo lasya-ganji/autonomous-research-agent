@@ -1,8 +1,8 @@
 import os
-import json
-import re
 from openai import OpenAI
 from dotenv import load_dotenv
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree 
 
 # Load environment variables
 load_dotenv()
@@ -11,6 +11,7 @@ load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
+@traceable(name="llm_call")  # LangSmith tracing
 def call_llm(prompt: str, temperature: float = 0.2):
     try:
         messages = [
@@ -41,11 +42,27 @@ If JSON is requested:
 
         content = response.choices[0].message.content
 
-        print("\n[LLM RAW OUTPUT]:\n", content)
+        # Extract usage
+        usage = response.usage
 
-        return content
+        # IMPORTANT FIX: Attach usage to LangSmith
+        run = get_current_run_tree()
+        if run and usage:
+            run.extra = {
+                "token_usage": {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens
+                }
+            }
 
-    except Exception as e:
         return {
-            "error": str(e)
+            "content": content,
+            "usage": {
+                "prompt_tokens": usage.prompt_tokens if usage else 0,
+                "completion_tokens": usage.completion_tokens if usage else 0,
+                "total_tokens": usage.total_tokens if usage else 0
+            }
         }
+    except Exception as e:
+        return {"content": "", "usage": {}, "error": str(e)}

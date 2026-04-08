@@ -10,7 +10,6 @@ from models.report_models import ReportModel
 from models.error_models import ErrorLog
 from models.cache_models import CacheModel
 
-
 class ResearchState(BaseModel):
     # INPUT
     query: str
@@ -57,7 +56,6 @@ class ResearchState(BaseModel):
 
 
     # BUDGET / CACHING
-    token_usage: int = Field(default=0, ge=0)
     budget_remaining: int = Field(default=0, ge=0)
     cache_hit: bool = False
     caches: List[CacheModel] = Field(default_factory=list)
@@ -67,3 +65,10 @@ class ResearchState(BaseModel):
 
     # DEBUG / OBSERVABILITY
     node_logs: Dict[str, Any] = Field(default_factory=dict)
+
+    total_tokens: int = 0
+    total_cost: float = 0.0
+    cost_limit: float = 2.0   # ₹ limit (change if needed)
+    abort: bool = False
+
+    

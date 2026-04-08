@@ -3,6 +3,9 @@ from models.search_models import SearchResult
 from models.citation_models import Citation
 from models.enums import CitationStatus
 
+from models.error_models import ErrorLog
+from models.enums import SeverityEnum, ErrorTypeEnum
+
 from tools.search_tool import search_tool
 from tools.scraper_tool import scrape_url
 
@@ -24,7 +27,9 @@ from datetime import datetime
 
 @trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
-
+    # ✅ ADDED (safety init)
+    if state.errors is None:
+        state.errors = []
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
 
@@ -48,6 +53,18 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 raw_results = search_tool(fallback_query)
 
             raw_results = raw_results or []
+
+            # ✅ ADDED (empty results logging)
+            if not raw_results:
+                state.errors.append(
+                    ErrorLog(
+                        node="searcher_node",
+                        timestamp=datetime.now().isoformat(),
+                        severity=SeverityEnum.WARNING,
+                        error_type=ErrorTypeEnum.search_failure,
+                        message=f"No results found for query: {query}"
+                    )
+                )
 
             # 2. DEDUP PIPELINE
             deduped_results = deduplicate_pipeline(raw_results)
@@ -100,6 +117,17 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 except Exception:
                     status = CitationStatus.broken
 
+                    # ✅ ADDED
+                    state.errors.append(
+                        ErrorLog(
+                            node="searcher_node",
+                            timestamp=datetime.now().isoformat(),
+                            severity=SeverityEnum.WARNING,
+                            error_type=ErrorTypeEnum.search_failure,
+                            message=f"URL validation failed: {norm_url}"
+                        )
+                    )
+
                 # Scraping (balanced)
                 content = None
                 publish_date = None
@@ -110,7 +138,16 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         content = scraped.get("content")
                         publish_date = scraped.get("publish_date")
                     except Exception:
-                        pass
+                        # ✅ ADDED
+                        state.errors.append(
+                            ErrorLog(
+                                node="searcher_node",
+                                timestamp=datetime.now().isoformat(),
+                                severity=SeverityEnum.WARNING,
+                                error_type=ErrorTypeEnum.timeout,
+                                message=f"Scrape failed for URL: {norm_url}"
+                            )
+                        )
 
                 result = SearchResult(
                     citation_id=citation_id,
@@ -143,6 +180,17 @@ def searcher_node(state: ResearchState) -> ResearchState:
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
 
+        # ✅ ADDED (critical error logging)
+        state.errors.append(
+            ErrorLog(
+                node="searcher_node",
+                timestamp=datetime.now().isoformat(),
+                severity=SeverityEnum.CRITICAL,
+                error_type=ErrorTypeEnum.search_failure,
+                message=str(e)
+            )
+        )
+
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,
@@ -155,7 +203,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id: len(results)
             for step_id, results in state.search_results.items()
         },
-        "total_citations": len(state.citations)
+        "total_citations": len(state.citations),
+
+        # ✅ ADDED
+        "errors_count": len(state.errors)
     }
 
     state.node_execution_count += 1
