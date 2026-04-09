@@ -236,12 +236,16 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             partial=(len(claims) == 0),
         )
 
-        state.node_logs[NodeNames.SYNTHESIS] = {
+        existing_log = state.node_logs.get(NodeNames.SYNTHESIS, {})
+
+        existing_log.update({
             "num_claims": len(claims),
             "valid_citations_used": len(used_ids),
             "conflicts": len(conflicts) if conflicts else 0,
             "partial": state.synthesis.partial,
-        }
+        })
+
+        state.node_logs[NodeNames.SYNTHESIS] = existing_log
 
         log_node_execution("synthesiser", {}, {}, start_time)
 

@@ -134,7 +134,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             .replace("{citations}", citations_text)
         )
 
-        res = call_llm(prompt=prompt, temperature=0.2)
+        res = call_llm(prompt=prompt, temperature=0.1)
         response = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
@@ -187,13 +187,15 @@ def reporter_node(state: ResearchState) -> ResearchState:
             },
         )
 
-        state.node_logs[NodeNames.REPORTER] = {
+        existing_log = state.node_logs.get(NodeNames.REPORTER, {})
+
+        existing_log.update({
             "report_generated": True,
             "citations_used": len(sorted_ids),
             "conflicts": len(state.synthesis.conflicts) if state.synthesis.conflicts else 0,
-            "total_tokens": state.total_tokens,
-            "total_cost": state.total_cost,
-        }
+        })
+
+        state.node_logs[NodeNames.REPORTER] = existing_log
 
         log_node_execution("reporter", {}, {}, start_time)
 

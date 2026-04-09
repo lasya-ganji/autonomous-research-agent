@@ -56,11 +56,18 @@ def trace_node(node_name: str):
 
                 existing_log = state.node_logs.get(node_name, {})
 
-                existing_log["_trace"] = {
-                    "duration_s": duration,
-                    "status": status
-                }
+                trace = existing_log.get("_trace", {})
 
+                total_duration = trace.get("total_duration_s", 0) + duration
+                run_count = trace.get("run_count", 0) + 1
+
+                trace.update({
+                    "total_duration_s": round(total_duration, 3),  
+                    "run_count": run_count,
+                    "status": status
+                })
+
+                existing_log["_trace"] = trace
                 state.node_logs[node_name] = existing_log
 
         return wrapper

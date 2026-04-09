@@ -68,7 +68,7 @@ class ResearchState(BaseModel):
 
     total_tokens: int = 0
     total_cost: float = 0.0
-    cost_limit: float = 2.0   # ₹ limit (change if needed)
+    cost_limit: float = 2.0   
     abort: bool = False
 
     next_node: Optional[str] = None

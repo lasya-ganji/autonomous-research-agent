@@ -180,13 +180,17 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 if cid and cid in state.citations:
                     state.citations[cid].quality_score = round(r.quality_score, 3)
 
-        state.node_logs[NodeNames.EVALUATOR] = {
+        existing_log = state.node_logs.get(NodeNames.EVALUATOR, {})
+
+        existing_log.update({
             "decision": decision,
             "avg_confidence": avg_confidence,
             "failed_steps": failed_steps,
             "total_steps": total_steps,
             "no_improvement": no_improvement,
-        }
+        })
+
+        state.node_logs[NodeNames.EVALUATOR] = existing_log
 
         output_data = {"decision": decision, "avg_confidence": avg_confidence}
         log_node_execution("evaluator", input_data, output_data, start_time)

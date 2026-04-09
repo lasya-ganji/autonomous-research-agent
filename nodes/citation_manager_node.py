@@ -223,8 +223,13 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         "used_citations": list(used_ids),
     }
 
-    state.node_logs["citation"] = metrics
-    state.node_logs[NodeNames.CITATION_MANAGER] = metrics
+    existing_log = state.node_logs.get("citation", {})
+    existing_log.update(metrics)
+    state.node_logs["citation"] = existing_log
+
+    existing_log = state.node_logs.get(NodeNames.CITATION_MANAGER, {})
+    existing_log.update(metrics)
+    state.node_logs[NodeNames.CITATION_MANAGER] = existing_log
 
     output_data = {
         "num_citations": len(state.citations),

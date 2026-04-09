@@ -197,17 +197,19 @@ def searcher_node(state: ResearchState) -> ResearchState:
         output_data={k: len(v) for k, v in state.search_results.items()}
     )
 
-    state.node_logs[NodeNames.SEARCHER] = {
+    existing_log = state.node_logs.get(NodeNames.SEARCHER, {})
+
+    existing_log.update({
         "total_steps": len(state.research_plan),
         "results_per_step": {
             step_id: len(results)
             for step_id, results in state.search_results.items()
         },
         "total_citations": len(state.citations),
-
-        
         "errors_count": len(state.errors)
-    }
+    })
+
+    state.node_logs[NodeNames.SEARCHER] = existing_log
 
     state.node_execution_count += 1
 

@@ -42,7 +42,10 @@ def safe_get(obj, key, default=None):
 def get_node_time(node_logs, node_key):
     node = node_logs.get(node_key, {})
     trace = node.get("_trace", {})
-    return round(trace.get("duration_s", 0), 2)
+    total = trace.get("total_duration_s", 0)
+    runs = trace.get("run_count", 0)
+
+    return round(total, 2), runs
 
 
 def render_report(content):
@@ -103,7 +106,11 @@ if run_button:
             st.error("No report generated.")
 
         st.divider()
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['REPORT'])}s")
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['REPORT'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
 
     # ---------------- PLAN ----------------
@@ -121,8 +128,11 @@ if run_button:
         else:
             st.info("No plan available.")
 
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['PLAN'])}s")
-
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['PLAN'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- SEARCH ----------------
     with tab3:
@@ -147,7 +157,11 @@ if run_button:
 
                         st.divider()
 
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['SEARCH'])}s")
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['SEARCH'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
 
     # ---------------- EVALUATION ----------------
@@ -169,8 +183,11 @@ if run_button:
         else:
             st.info("No evaluation data available.")
 
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['EVALUATION'])}s")
-
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['EVALUATION'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- SYNTHESIS ----------------
     with tab5:
@@ -194,8 +211,11 @@ if run_button:
         else:
             st.info("No synthesis available.")
 
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['SYNTHESIS'])}s")
-
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['SYNTHESIS'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- CITATIONS ----------------
     with tab6:
@@ -221,7 +241,11 @@ if run_button:
         else:
             st.info("No citations available.")
 
-        st.caption(f"Time: {get_node_time(node_logs, NODE_KEYS['CITATION'])}s")
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['CITATION'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- DEBUG / COST / ERRORS ----------------
     with tab7:
@@ -232,7 +256,7 @@ if run_button:
                 if node == "citation":
                     continue  # hide test-only duplicate; keep CITATION_MANAGER for UI
                 with st.expander(f"{node} NODE"):
-                    # REMOVE TRACE FROM DEBUG DISPLAY
+                    
                     debug_data = {k: v for k, v in data.items() if k != "_trace"}
 
                     if debug_data:
@@ -245,12 +269,12 @@ if run_button:
 
         st.divider()
 
-        st.subheader("Cost & Token Usage")
+        st.subheader("Execution Metrics")
         st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
         st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
 
         if result.get("abort"):
-            st.error("⚠️ Execution stopped due to cost limit")
+            st.error("Execution stopped due to cost limit")
 
         st.subheader("Errors")
         errors = result.get("errors")

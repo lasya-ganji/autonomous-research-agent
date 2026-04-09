@@ -206,10 +206,14 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
         state.research_plan = [PlanStep(step_id=1, question=fallback_question, priority=1)]
         state.search_results = {}
         state.search_retry_count = 0
-        state.node_logs[NodeNames.PLANNER] = {
+        existing_log = state.node_logs.get(NodeNames.PLANNER, {})
+
+        existing_log.update({
             "num_steps": 1,
             "questions": [fallback_question],
-        }
+        })
+
+        state.node_logs[NodeNames.PLANNER] = existing_log
 
         log_node_execution(
             "planner_node",
