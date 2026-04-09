@@ -68,7 +68,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                     )
                 )
             else:
-                # SCORING (tests monkeypatch score_results(results, query))
+                # SCORING
                 try:
                     scored_results = score_results(results, query)
                     state.search_results[step_id] = scored_results
@@ -87,7 +87,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 if not scored_results:
                     failure_reason = "all results filtered"
                 else:
-                    # CONFIDENCE (tests monkeypatch compute_confidence(results, query))
+                    # CONFIDENCE 
                     try:
                         confidence = max(
                             0.0,
@@ -173,7 +173,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         state.evaluation = EvaluationResult(steps=step_evaluations, decision=decision)
         state.overall_confidence = avg_confidence
 
-        # Propagate quality to citations (best-effort)
+        
         for results in state.search_results.values():
             for r in results:
                 cid = getattr(r, "citation_id", None)
@@ -195,7 +195,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         return state
 
     except Exception as e:
-        # Keep pipeline alive for non-safety exceptions.
+        
         state.errors.append(
             ErrorLog(
                 node="evaluator_node",

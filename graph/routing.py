@@ -2,7 +2,7 @@ from models.state import ResearchState
 
 
 def route_after_evaluator(state: ResearchState) -> str:
-    decision = state.evaluation.decision
+    return state.next_node or "reporter"
 
     if decision == "proceed":
         return "proceed"

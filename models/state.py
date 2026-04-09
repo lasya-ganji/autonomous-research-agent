@@ -71,4 +71,4 @@ class ResearchState(BaseModel):
     cost_limit: float = 2.0   # ₹ limit (change if needed)
     abort: bool = False
 
-    
+    next_node: Optional[str] = None

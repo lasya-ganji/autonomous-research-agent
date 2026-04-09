@@ -40,7 +40,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         if state.node_execution_count >= 12:
             raise Exception("Max node execution limit reached")
 
-        # 1) FILTER VALID RESULTS
+        # FILTER VALID RESULTS
         valid_results = []
         for results in state.search_results.values():
             for r in results:
@@ -61,10 +61,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-        # 2) SORT + SELECT TOP-K (quality-driven)
+        # SORT + SELECT TOP-K 
         valid_results = sorted(valid_results, key=lambda x: getattr(x, "quality_score", 0), reverse=True)[:12]
 
-        # 3) BUILD CONTEXT WITH STRONG CHUNKS
+        # BUILD CONTEXT WITH STRONG CHUNKS
         context_docs: List[str] = []
         doc_chunks: List[Tuple[str, List[str]]] = []
         state.citation_chunks = {}
@@ -89,7 +89,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             doc_chunks.append((r.citation_id, selected_chunks))
             state.citation_chunks[r.citation_id] = selected_chunks
 
-        # round-robin context distribution (prevents dominance)
+        # round-robin (prevents dominance)
         i = 0
         while len(context_docs) < 25:
             added = False
@@ -120,7 +120,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         context_docs = list(dict.fromkeys(context_docs))
         context_str = "\n\n".join(context_docs)[:22000]
 
-        # 4) CALL LLM
+        # CALL LLM
         prompt = (
             load_prompt("synthesiser.txt")
             .replace("{query}", state.query)
@@ -164,7 +164,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
             parsed = {}
 
-        # 5) BUILD CLAIMS SAFELY (feature/others style robust filtering)
+    
         valid_ids_set = {cid for cid, c in state.citations.items() if c.status == CitationStatus.valid}
         claims: List[Claim] = []
         used_ids: Set[str] = set()
@@ -185,13 +185,12 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                         filtered_ids.append(cid)
 
                 if not filtered_ids:
-                    # fallback to first valid result citation id
+                    
                     if valid_results:
                         filtered_ids = [valid_results[0].citation_id]
                     else:
                         continue
 
-                # optional expansion: if only one id, include another grounded id
                 if len(filtered_ids) == 1:
                     primary_id = filtered_ids[0]
                     for r in valid_results:
@@ -229,7 +228,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         conflicts = parsed.get("conflicts", [])
 
-        # 7) FINAL STATE UPDATE
+        # FINAL STATE UPDATE
         state.used_citation_ids = used_ids
         state.synthesis = SynthesisModel(
             claims=claims,

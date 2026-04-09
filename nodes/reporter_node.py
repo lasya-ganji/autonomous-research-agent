@@ -26,7 +26,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         if state.node_logs is None:
             state.node_logs = {}
 
-        # NO DATA CASE
+        
         if not state.synthesis or not state.synthesis.claims:
             state.report = ReportModel(
                 title="Research Report",
@@ -230,8 +230,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             "report_generated": False,
             "citations_used": 0,
             "conflicts": 0,
-            "total_tokens": state.total_tokens,
-            "total_cost": state.total_cost,
+            
         }
 
         log_node_execution("reporter", {}, {}, start_time)

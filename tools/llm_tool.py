@@ -45,7 +45,6 @@ If JSON is requested:
         # Extract usage
         usage = response.usage
 
-        # IMPORTANT FIX: Attach usage to LangSmith
         run = get_current_run_tree()
         if run and usage:
             run.extra = {

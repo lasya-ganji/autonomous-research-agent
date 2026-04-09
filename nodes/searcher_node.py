@@ -27,7 +27,7 @@ from datetime import datetime
 
 @trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
-    # ✅ ADDED (safety init)
+    
     if state.errors is None:
         state.errors = []
     if state.node_execution_count >= 12:
@@ -45,7 +45,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_id = step.step_id
             query = step.question
 
-            # 1. SEARCH
+            # SEARCH
             raw_results = search_tool(query)
 
             if not raw_results:
@@ -54,7 +54,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             raw_results = raw_results or []
 
-            # ✅ ADDED (empty results logging)
+            
             if not raw_results:
                 state.errors.append(
                     ErrorLog(
@@ -66,7 +66,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     )
                 )
 
-            # 2. DEDUP PIPELINE
+            # DEDUP PIPELINE
             deduped_results = deduplicate_pipeline(raw_results)
             
             
@@ -81,7 +81,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     continue
 
                 norm_url = normalize_url(url)
-                domain = urlparse(norm_url).netloc  # FIXED
+                domain = urlparse(norm_url).netloc  
 
                 if domain_count.get(domain, 0) >= MAX_PER_DOMAIN:
                     continue
@@ -94,11 +94,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                 unique_results.append((r, norm_url))
 
-            # LIMIT RESULTS (IMPORTANT)
+            # LIMIT RESULTS
             MAX_RESULTS_PER_STEP = 5
             unique_results = unique_results[:MAX_RESULTS_PER_STEP]
 
-            # 3. STRUCTURE RESULTS
+            # STRUCTURE RESULTS
             structured_results = []
 
             MAX_SCRAPES = 3
@@ -117,7 +117,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 except Exception:
                     status = CitationStatus.broken
 
-                    # ✅ ADDED
+                    # ADDED
                     state.errors.append(
                         ErrorLog(
                             node="searcher_node",
@@ -128,7 +128,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         )
                     )
 
-                # Scraping (balanced)
+                # Scraping 
                 content = None
                 publish_date = None
 
@@ -138,7 +138,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         content = scraped.get("content")
                         publish_date = scraped.get("publish_date")
                     except Exception:
-                        # ✅ ADDED
+                        # ADDED
                         state.errors.append(
                             ErrorLog(
                                 node="searcher_node",
@@ -180,7 +180,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
     except Exception as e:
         print(f"[SEARCHER NODE ERROR] {e}")
 
-        # ✅ ADDED (critical error logging)
+        # critical error logging
         state.errors.append(
             ErrorLog(
                 node="searcher_node",
@@ -205,7 +205,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
         },
         "total_citations": len(state.citations),
 
-        # ✅ ADDED
+        
         "errors_count": len(state.errors)
     }
 

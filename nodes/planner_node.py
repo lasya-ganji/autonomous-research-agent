@@ -20,7 +20,7 @@ from utils.prompt_loader import load_prompt
 def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
     start_time = time.time()
 
-    # Hard safety failures should bubble up (unit tests assert exceptions).
+
     if state.node_execution_count >= 12:
         raise Exception("Max node execution limit reached")
     if not state.query:
@@ -189,7 +189,7 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
         return state
 
     except Exception as e:
-        # Keep pipeline alive for parsing/model issues; safety exceptions are raised earlier.
+        
         if state.errors is None:
             state.errors = []
         state.errors.append(
