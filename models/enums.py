@@ -24,3 +24,6 @@ class ErrorTypeEnum(str, Enum):
     low_confidence = "low_confidence"
     timeout = "timeout"
     parsing_error = "parsing_error"
+    system_error = "system_error"
+    budget_exceeded = "budget_exceeded"
+    loop_limit = "loop_limit"

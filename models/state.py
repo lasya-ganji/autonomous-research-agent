@@ -10,7 +10,9 @@ from models.report_models import ReportModel
 from models.error_models import ErrorLog
 from models.cache_models import CacheModel
 
+
 class ResearchState(BaseModel):
+
     # INPUT
     query: str
 
@@ -21,41 +23,47 @@ class ResearchState(BaseModel):
     search_results: Dict[int, List[SearchResult]] = Field(default_factory=dict)
     failed_queries: List[str] = Field(default_factory=list)
 
-    # DEDUPLICATION
+    # DEDUP
     deduplicated_urls: Set[str] = Field(default_factory=set)
 
-    # CONTEXT BUILDING
+    # CONTEXT
     context_docs: List[str] = Field(default_factory=list)
     doc_summaries: Dict[str, str] = Field(default_factory=dict)
 
     # EVALUATION
     evaluation: Optional[EvaluationResult] = None
     failure_reason: str = ""
-    overall_confidence: float = 0.0  
+    overall_confidence: float = 0.0
 
     # RETRY / REPLAN
     search_retry_count: int = Field(default=0, ge=0)
     replan_count: int = Field(default=0, ge=0)
 
-    # EXECUTION TRACKING
+    # EXECUTION
     unresolved_steps: List[int] = Field(default_factory=list)
-    node_execution_count: int = Field(default=0, ge=0, le=12)
+    node_execution_count: int = Field(default=0, ge=0)
 
     # OUTPUT
     synthesis: Optional[SynthesisModel] = None
     report: Optional[ReportModel] = None
 
-    # CITATIONS (SOURCE OF TRUTH)
+    # CITATIONS
     citations: Dict[str, Citation] = Field(default_factory=dict)
-    
-    # Track which citations are used in synthesis/report
     used_citation_ids: Set[str] = Field(default_factory=set)
-    citation_mapping: Dict[str, str] = {}
-    
+    citation_mapping: Dict[str, str] = Field(default_factory=dict)
     citation_chunks: Dict[str, List[str]] = Field(default_factory=dict)
 
+    # NEW (IMPORTANT)
+    failure_counts: Dict[str, int] = Field(default_factory=lambda: {
+        "search_failures": 0,
+        "parsing_failures": 0,
+        "low_confidence": 0,
+        "citation_failures": 0,
+    })
 
-    # BUDGET / CACHING
+    is_partial: bool = False
+
+    # BUDGET
     budget_remaining: int = Field(default=0, ge=0)
     cache_hit: bool = False
     caches: List[CacheModel] = Field(default_factory=list)
@@ -63,12 +71,13 @@ class ResearchState(BaseModel):
     # ERRORS
     errors: List[ErrorLog] = Field(default_factory=list)
 
-    # DEBUG / OBSERVABILITY
+    # OBSERVABILITY
     node_logs: Dict[str, Any] = Field(default_factory=dict)
 
     total_tokens: int = 0
     total_cost: float = 0.0
-    cost_limit: float = 2.0   
+    cost_limit: float = 2.0
     abort: bool = False
 
+    # ROUTING
     next_node: Optional[str] = None
