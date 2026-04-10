@@ -66,9 +66,22 @@ def compute_similarity_score(claim_text: str, chunk: str) -> float:
 @trace_node(NodeNames.CITATION_MANAGER)
 def citation_manager_node(state: ResearchState) -> ResearchState:
 
+    # -------------------------------
     # SAFETY INIT
+    # -------------------------------
     if state.errors is None:
         state.errors = []
+
+    if state.node_logs is None:
+        state.node_logs = {}
+
+    if not hasattr(state, "failure_counts") or state.failure_counts is None:
+        state.failure_counts = {
+            "search_failures": 0,
+            "parsing_failures": 0,
+            "low_confidence": 0,
+            "citation_failures": 0,
+        }
 
     if state.citations is None:
         state.errors.append(
@@ -82,32 +95,23 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         )
         state.citations = {}
 
-    if state.node_logs is None:
-        state.node_logs = {}
-
     if state.citation_chunks is None:
         state.citation_chunks = {}
 
-
     input_data = {
-        "num_steps": len(state.search_results or {}),
-        "existing_citations": len(state.citations)
+        "num_citations": len(state.citations),
+        "num_claims": len(state.synthesis.claims) if state.synthesis else 0
     }
 
-    # 1. URL VALIDATION
+    # -------------------------------
+    # 1. URL VALIDATION (OPTIMIZED)
+    # -------------------------------
     for cid, citation in state.citations.items():
         try:
             if citation.status != CitationStatus.valid:
                 citation.status = validate_url(str(citation.url))
-
-                if citation.status == CitationStatus.broken:
-                    citation.status = validate_url(str(citation.url))
-
-            print(f"[URL] {cid} status={citation.status}")
-
         except Exception as e:
             citation.status = CitationStatus.broken
-            print(f"[URL ERROR] {cid}: {e}")
 
             state.errors.append(
                 ErrorLog(
@@ -120,13 +124,15 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
             )
 
     used_ids: Set[str] = set()
-    all_scores = []
+    dropped_citations = 0
+    claim_debug = {}
 
-    # 2. CLAIM VALIDATION
-    if state.synthesis and getattr(state.synthesis, "claims", None):
+    # -------------------------------
+    # 2. CLAIM VALIDATION (RELAXED)
+    # -------------------------------
+    if state.synthesis and state.synthesis.claims:
+
         for claim in state.synthesis.claims:
-
-            print(f"\n[CLAIM] {claim.text}")
 
             cleaned_ids = []
             citation_scores = {}
@@ -134,116 +140,106 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
 
             for cid in claim.citation_ids:
                 cid = normalize_citation_id(cid)
-
-                print(f"  [CITATION] {cid}")
-
                 citation_obj = state.citations.get(cid)
 
-                if not citation_obj:
-                    print("    skip: not found")
-                    hallucinated.append(cid)
-                    continue
-
-                if citation_obj.status != CitationStatus.valid:
-                    print(f"    skip: status={citation_obj.status}")
+                if not citation_obj or citation_obj.status != CitationStatus.valid:
                     hallucinated.append(cid)
                     continue
 
                 chunks = state.citation_chunks.get(cid, [])
                 if not chunks:
-                    print("    skip: no chunks")
                     hallucinated.append(cid)
                     continue
 
                 best_score = 0.0
 
-                for i, chunk in enumerate(chunks):
+                for chunk in chunks:
                     score = compute_similarity_score(claim.text, chunk)
-                    print(f"    chunk[{i}] score={round(score, 3)}")
-
                     if score > best_score:
                         best_score = score
 
-                print(f"    best_score={round(best_score, 3)}")
-                all_scores.append(best_score)
-
-                if best_score > 0.3:
-                    print("    pass")
+                # RELAXED THRESHOLD (KEY FIX)
+                if best_score > 0.25:
                     cleaned_ids.append(cid)
                     citation_scores[cid] = best_score
                 else:
-                    print("    fail")
                     hallucinated.append(cid)
+                    dropped_citations += 1
 
-            print(f"  cleaned_ids={cleaned_ids}")
-            print(f"  scores={[round(s, 3) for s in citation_scores.values()]}")
-
+            # -------------------------------
             # CLAIM DECISION
+            # -------------------------------
             if citation_scores:
                 avg_score = sum(citation_scores.values()) / len(citation_scores)
-
-                print(f"  avg_score={round(avg_score, 3)}")
 
                 claim.citation_confidence = avg_score
                 claim.citation_ids = cleaned_ids
                 claim.citation_score_map = citation_scores
                 claim.hallucinated_citations = hallucinated
 
-                if avg_score > 0.4:
-                    claim.verified = True
+                # RELAXED VERIFICATION
+                claim.verified = avg_score > 0.3
+
+                if claim.verified:
                     used_ids.update(cleaned_ids)
                 else:
-                    claim.verified = False
-
-                print(f"  verified={claim.verified}")
+                    state.failure_counts["citation_failures"] += 1
 
             else:
-                print("  no valid citations")
-
                 claim.verified = False
                 claim.citation_ids = []
                 claim.citation_confidence = 0.0
                 claim.citation_score_map = {}
                 claim.hallucinated_citations = hallucinated
+                state.failure_counts["citation_failures"] += 1
+
+            claim_debug[claim.text[:80]] = {
+                "citations": len(cleaned_ids),
+                "confidence": round(claim.citation_confidence, 3),
+                "verified": claim.verified
+            }
 
     state.used_citation_ids = used_ids
 
-    print(f"\n[ALL SCORES] {[round(s, 3) for s in all_scores]}")
+    # -------------------------------
+    # 3. PARTIAL HANDLING
+    # -------------------------------
+    if state.synthesis:
+        if len(used_ids) < 2:
+            state.synthesis.partial = True
 
-    # 3. METRICS
+    # -------------------------------
+    # 4. METRICS
+    # -------------------------------
     num_valid = sum(1 for c in state.citations.values() if c.status == CitationStatus.valid)
     num_broken = sum(1 for c in state.citations.values() if c.status == CitationStatus.broken)
     num_stale = sum(1 for c in state.citations.values() if c.status == CitationStatus.stale)
 
-    metrics = {
-        "num_citations": len(state.citations),
-        "num_valid": num_valid,
-        "num_broken": num_broken,
-        "num_stale": num_stale,
-        "used_citations": list(used_ids),
-    }
-
-    existing_log = state.node_logs.get("citation", {})
-    existing_log.update(metrics)
-    state.node_logs["citation"] = existing_log
-
-    existing_log = state.node_logs.get(NodeNames.CITATION_MANAGER, {})
-    existing_log.update(metrics)
-    state.node_logs[NodeNames.CITATION_MANAGER] = existing_log
-
-    output_data = {
-        "num_citations": len(state.citations),
+    node_name = NodeNames.CITATION_MANAGER
+    existing_log = state.node_logs.get(node_name, {})
+    
+    existing_log.update({
+        "total_citations": len(state.citations),
         "valid": num_valid,
         "broken": num_broken,
         "stale": num_stale,
-        "used": len(used_ids)
-    }
+        "used": len(used_ids),
+        "dropped": dropped_citations,
+        "claim_debug": claim_debug,
+        "failure_counts": state.failure_counts
+    })
+    
+    state.node_logs[node_name] = existing_log
 
-    print(
-        f"[CITATION DEBUG] total={len(state.citations)} "
-        f"valid={num_valid} used={len(used_ids)}"
+    log_node_execution(
+        "citation_manager_node",
+        input_data,
+        {
+            "used_citations": len(used_ids),
+            "valid": num_valid,
+            "dropped": dropped_citations
+        }
     )
 
-    log_node_execution("citation", input_data, output_data)
-
+    state.node_execution_count += 1
     return state

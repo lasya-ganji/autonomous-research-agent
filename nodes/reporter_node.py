@@ -18,15 +18,19 @@ from services.system.cost_tracker import calculate_cost
 
 @trace_node(NodeNames.REPORTER)
 def reporter_node(state: ResearchState) -> ResearchState:
-    start_time = time.time()
 
     try:
+        # -------------------------------
+        # SAFETY INIT
+        # -------------------------------
         if state.errors is None:
             state.errors = []
         if state.node_logs is None:
             state.node_logs = {}
 
-        
+        # -------------------------------
+        # EMPTY SYNTHESIS
+        # -------------------------------
         if not state.synthesis or not state.synthesis.claims:
             state.report = ReportModel(
                 title="Research Report",
@@ -40,74 +44,70 @@ def reporter_node(state: ResearchState) -> ResearchState:
                     "errors": [e.model_dump() for e in state.errors],
                 },
             )
-            state.node_execution_count += 1
+
             state.node_logs[NodeNames.REPORTER] = {
                 "report_generated": False,
                 "citations_used": 0,
-                "conflicts": 0,
-                "total_tokens": state.total_tokens,
-                "total_cost": state.total_cost,
+                "claims": 0
             }
-            log_node_execution("reporter", {}, {}, start_time)
+
+            log_node_execution("reporter_node", {}, {})
+            state.node_execution_count += 1
             return state
 
-        valid_citations: Dict[str, object] = {
-            cid: c for cid, c in state.citations.items() if c.status == CitationStatus.valid
+        # -------------------------------
+        # VALID CITATIONS
+        # -------------------------------
+        valid_citations = {
+            cid: c for cid, c in state.citations.items()
+            if c.status == CitationStatus.valid
         }
 
-        # COLLECT IDs referenced by claims
-        all_claim_ids: Set[str] = set()
+        # -------------------------------
+        # COLLECT USED IDS
+        # -------------------------------
+        used_ids = set()
         for claim in state.synthesis.claims:
             for cid in getattr(claim, "citation_ids", []):
                 if cid in valid_citations:
-                    all_claim_ids.add(cid)
+                    used_ids.add(cid)
 
         sorted_ids = sorted(
-            all_claim_ids,
-            key=lambda x: int(x.strip("[]")) if x.strip("[]").isdigit() else 0,
+            used_ids,
+            key=lambda x: int(x.strip("[]")) if x.strip("[]").isdigit() else 0
         )
 
-        # Mapping old numeric IDs to new sequential IDs
-        id_mapping = {old: f"[{i + 1}]" for i, old in enumerate(sorted_ids)}
+        id_mapping = {old: f"[{i+1}]" for i, old in enumerate(sorted_ids)}
         state.citation_mapping = id_mapping
 
-        synthesis_lines: List[str] = []
-        used_ids: Set[str] = set()
+        # -------------------------------
+        # BUILD SYNTHESIS TEXT (FORMAT ONLY)
+        # -------------------------------
+        synthesis_lines = []
+        unverified_count = 0
 
         for claim in state.synthesis.claims:
-            valid_ids = [cid for cid in getattr(claim, "citation_ids", []) if cid in valid_citations]
+            valid_ids = [
+                cid for cid in getattr(claim, "citation_ids", [])
+                if cid in valid_citations
+            ]
 
             if not valid_ids:
                 synthesis_lines.append(f"{claim.text} [UNVERIFIED]")
+                unverified_count += 1
                 continue
 
-            used_ids.update(valid_ids)
             mapped_ids = [id_mapping.get(cid, cid) for cid in valid_ids]
-            synthesis_lines.append(
-                f"{claim.text} {' '.join(mapped_ids)} "
-                f"(confidence: {round(getattr(claim, 'citation_confidence', 0.0), 2)}, verified: {getattr(claim, 'verified', False)})"
-            )
-
-        if not synthesis_lines:
-            state.report = ReportModel(
-                title="Research Report",
-                sections=["No valid citations available."],
-                citations=[],
-                metadata={
-                    "query": state.query,
-                    "timestamp": datetime.now().isoformat(),
-                    "model": "llm",
-                    "partial": True,
-                    "errors": [e.model_dump() for e in state.errors],
-                },
-            )
-            return state
+            synthesis_lines.append(f"{claim.text} {' '.join(mapped_ids)}")
 
         synthesis_text = "\n".join(synthesis_lines)
 
-        # FULL CITATION METADATA
-        citations_list: List[Dict] = []
-        citations_text_lines: List[str] = []
+        # -------------------------------
+        # CITATIONS LIST
+        # -------------------------------
+        citations_list = []
+        citations_text_lines = []
+
         for cid in sorted_ids:
             c = valid_citations[cid]
             entry = {
@@ -118,19 +118,19 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 "accessed_at": datetime.now().isoformat(),
             }
             citations_list.append(entry)
-            citations_text_lines.append(f"{entry['id']} {entry['title']} - {entry['url']}")
+            citations_text_lines.append(
+                f"{entry['id']} {entry['title']} - {entry['url']}"
+            )
 
         citations_text = "\n".join(citations_text_lines)
 
-        # CONFLICTS SECTION (if any)
-        conflicts_text = ""
-        if state.synthesis.conflicts:
-            conflicts_text = "\n\nConflicts:\n" + "\n".join(state.synthesis.conflicts)
-
+        # -------------------------------
+        # PROMPT (FORMATTER ONLY)
+        # -------------------------------
         prompt = (
             load_prompt("reporter.txt")
             .replace("{query}", state.query)
-            .replace("{synthesis}", synthesis_text + conflicts_text)
+            .replace("{synthesis}", synthesis_text)
             .replace("{citations}", citations_text)
         )
 
@@ -138,22 +138,28 @@ def reporter_node(state: ResearchState) -> ResearchState:
         response = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
-        # TOKEN/COST tracking
+        # -------------------------------
+        # COST TRACKING
+        # -------------------------------
         state.total_tokens += usage.get("total_tokens", 0)
-        state.total_cost += calculate_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+        state.total_cost += calculate_cost(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0)
+        )
 
-        # COST GUARDRAIL
         if state.total_cost > state.cost_limit:
             state.abort = True
+
             state.errors.append(
                 ErrorLog(
                     node="reporter_node",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     severity=SeverityEnum.CRITICAL,
-                    error_type=ErrorTypeEnum.timeout,
+                    error_type=ErrorTypeEnum.budget_exceeded,
                     message=f"Cost exceeded limit: ₹{state.total_cost}",
                 )
             )
+
             state.report = ReportModel(
                 title="Research Report",
                 sections=[response] if response else ["Cost limit exceeded."],
@@ -161,17 +167,28 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 metadata={
                     "query": state.query,
                     "timestamp": datetime.now().isoformat(),
-                    "model": "llm",
                     "partial": True,
                     "total_tokens": state.total_tokens,
                     "total_cost": state.total_cost,
                     "errors": [e.model_dump() for e in state.errors],
                 },
             )
+
             state.node_execution_count += 1
             return state
 
-        state.used_citation_ids = used_ids
+        # -------------------------------
+        # FINAL PARTIAL FLAG (STRICT)
+        # -------------------------------
+        partial_flag = (
+            state.synthesis.partial or
+            state.abort or
+            len(used_ids) < 2
+        )
+
+        # -------------------------------
+        # FINAL REPORT
+        # -------------------------------
         state.report = ReportModel(
             title="Research Report",
             sections=[response],
@@ -179,39 +196,44 @@ def reporter_node(state: ResearchState) -> ResearchState:
             metadata={
                 "query": state.query,
                 "timestamp": datetime.now().isoformat(),
-                "model": "llm",
-                "partial": state.synthesis.partial,
+                "partial": partial_flag,
                 "total_tokens": state.total_tokens,
                 "total_cost": state.total_cost,
                 "errors": [e.model_dump() for e in state.errors],
             },
         )
 
-        existing_log = state.node_logs.get(NodeNames.REPORTER, {})
-
+        # -------------------------------
+        # OBSERVABILITY
+        # -------------------------------
+        node_name = NodeNames.REPORTER
+        existing_log = state.node_logs.get(node_name, {})
         existing_log.update({
             "report_generated": True,
-            "citations_used": len(sorted_ids),
-            "conflicts": len(state.synthesis.conflicts) if state.synthesis.conflicts else 0,
+            "citations_used": len(used_ids),
+            "claims": len(state.synthesis.claims),
+            "unverified_claims": unverified_count,
+            "partial": partial_flag
         })
+        state.node_logs[node_name] = existing_log
 
-        state.node_logs[NodeNames.REPORTER] = existing_log
-
-        log_node_execution("reporter", {}, {}, start_time)
+        log_node_execution(
+            "reporter_node",
+            {"claims": len(state.synthesis.claims)},
+            {"citations": len(used_ids)}
+        )
 
         state.node_execution_count += 1
         return state
 
     except Exception as e:
-        if state.errors is None:
-            state.errors = []
         state.errors.append(
             ErrorLog(
                 node="reporter_node",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 severity=SeverityEnum.CRITICAL,
-                error_type=ErrorTypeEnum.parsing_error,
-                message=f"Unexpected error: {str(e)}",
+                error_type=ErrorTypeEnum.system_error,
+                message=str(e),
             )
         )
 
@@ -222,20 +244,15 @@ def reporter_node(state: ResearchState) -> ResearchState:
             metadata={
                 "query": state.query,
                 "timestamp": datetime.now().isoformat(),
-                "model": "llm",
                 "partial": True,
                 "errors": [err.model_dump() for err in state.errors],
             },
         )
 
         state.node_logs[NodeNames.REPORTER] = {
-            "report_generated": False,
-            "citations_used": 0,
-            "conflicts": 0,
-            
+            "report_generated": False
         }
 
-        log_node_execution("reporter", {}, {}, start_time)
+        log_node_execution("reporter_node", {}, {})
         state.node_execution_count += 1
         return state
-

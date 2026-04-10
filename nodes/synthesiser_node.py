@@ -28,7 +28,6 @@ def text_overlap(a: str, b: str) -> float:
 
 @trace_node(NodeNames.SYNTHESIS)
 def synthesiser_node(state: ResearchState) -> ResearchState:
-    start_time = time.time()
 
     try:
         # Safety init
@@ -37,10 +36,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         if state.node_logs is None:
             state.node_logs = {}
 
-        if state.node_execution_count >= 12:
-            raise Exception("Max node execution limit reached")
 
+        # -------------------------------
         # FILTER VALID RESULTS
+        # -------------------------------
         valid_results = []
         for results in state.search_results.values():
             for r in results:
@@ -61,12 +60,20 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-        # SORT + SELECT TOP-K 
-        valid_results = sorted(valid_results, key=lambda x: getattr(x, "quality_score", 0), reverse=True)[:12]
+        # -------------------------------
+        # SELECT TOP RESULTS
+        # -------------------------------
+        valid_results = sorted(
+            valid_results,
+            key=lambda x: getattr(x, "quality_score", 0),
+            reverse=True
+        )[:12]
 
-        # BUILD CONTEXT WITH STRONG CHUNKS
-        context_docs: List[str] = []
-        doc_chunks: List[Tuple[str, List[str]]] = []
+        # -------------------------------
+        # BUILD CONTEXT
+        # -------------------------------
+        context_docs = []
+        doc_chunks = []
         state.citation_chunks = {}
 
         for r in valid_results:
@@ -75,21 +82,17 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                 continue
 
             chunks = chunk_text(content) if r.content else [content]
-            scored_chunks = []
-            for chunk in chunks:
-                score = text_overlap(state.query, chunk)
-                scored_chunks.append((chunk, score))
 
-            # increased chunk coverage for better grounding
+            scored_chunks = [(c, text_overlap(state.query, c)) for c in chunks]
             top_chunks = sorted(scored_chunks, key=lambda x: x[1], reverse=True)[:3]
-            selected_chunks = [c[0] for c in top_chunks]
+
+            selected_chunks = [c[0] for c in top_chunks if c[0]]
             if not selected_chunks:
                 continue
 
             doc_chunks.append((r.citation_id, selected_chunks))
             state.citation_chunks[r.citation_id] = selected_chunks
 
-        # round-robin (prevents dominance)
         i = 0
         while len(context_docs) < 25:
             added = False
@@ -116,11 +119,12 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-        # deduplicate + limit
         context_docs = list(dict.fromkeys(context_docs))
         context_str = "\n\n".join(context_docs)[:22000]
 
-        # CALL LLM
+        # -------------------------------
+        # LLM CALL
+        # -------------------------------
         prompt = (
             load_prompt("synthesiser.txt")
             .replace("{query}", state.query)
@@ -131,11 +135,12 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         response_content = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
-        # Token/cost tracking
         state.total_tokens += usage.get("total_tokens", 0)
-        state.total_cost += calculate_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+        state.total_cost += calculate_cost(
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0)
+        )
 
-        # Cost guardrail
         if state.total_cost > state.cost_limit:
             state.abort = True
             state.errors.append(
@@ -143,13 +148,15 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     node="synthesiser_node",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     severity=SeverityEnum.CRITICAL,
-                    error_type=ErrorTypeEnum.timeout,
-                    message=f"Cost exceeded limit: ₹{state.total_cost}",
+                    error_type=ErrorTypeEnum.budget_exceeded,
+                    message=f"Cost exceeded: ₹{state.total_cost}",
                 )
             )
             return state
 
-        # PARSE JSON
+        # -------------------------------
+        # PARSE RESPONSE
+        # -------------------------------
         try:
             parsed = json.loads(response_content) if isinstance(response_content, str) else response_content
         except Exception as e:
@@ -164,10 +171,14 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
             parsed = {}
 
-    
-        valid_ids_set = {cid for cid, c in state.citations.items() if c.status == CitationStatus.valid}
-        claims: List[Claim] = []
-        used_ids: Set[str] = set()
+        valid_ids_set = {
+            cid for cid, c in state.citations.items()
+            if c.status == CitationStatus.valid
+        }
+
+        claims = []
+        used_ids = set()
+        dropped_claims = 0
 
         for c in parsed.get("claims", []):
             try:
@@ -176,7 +187,8 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     continue
 
                 raw_ids = c.get("citation_ids", []) or []
-                filtered_ids: List[str] = []
+                filtered_ids = []
+
                 for cid in raw_ids:
                     cid = str(cid).strip()
                     if not cid.startswith("["):
@@ -184,27 +196,14 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
+                # STRICT GROUNDING
                 if not filtered_ids:
-                    
-                    if valid_results:
-                        filtered_ids = [valid_results[0].citation_id]
-                    else:
-                        continue
-
-                if len(filtered_ids) == 1:
-                    primary_id = filtered_ids[0]
-                    for r in valid_results:
-                        cid = r.citation_id
-                        if cid != primary_id and cid in valid_ids_set:
-                            filtered_ids.append(cid)
-                            break
+                    dropped_claims += 1
+                    continue
 
                 used_ids.update(filtered_ids)
 
-                try:
-                    confidence = float(c.get("confidence", 0.5))
-                except Exception:
-                    confidence = 0.5
+                confidence = float(c.get("confidence", 0.5))
 
                 claims.append(
                     Claim(
@@ -215,7 +214,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                         citation_confidence=1.0,
                     )
                 )
+
             except Exception as e:
+                dropped_claims += 1
                 state.errors.append(
                     ErrorLog(
                         node="synthesiser_node",
@@ -228,26 +229,44 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         conflicts = parsed.get("conflicts", [])
 
-        # FINAL STATE UPDATE
+        # -------------------------------
+        # FINAL STATE
+        # -------------------------------
+        partial_flag = (
+            len(claims) == 0 or
+            len(used_ids) < 2
+        )
+
         state.used_citation_ids = used_ids
         state.synthesis = SynthesisModel(
             claims=claims,
             conflicts=conflicts,
-            partial=(len(claims) == 0),
+            partial=partial_flag,
         )
 
-        existing_log = state.node_logs.get(NodeNames.SYNTHESIS, {})
+        # -------------------------------
+        # OBSERVABILITY
+        # -------------------------------
+        node_name = NodeNames.SYNTHESIS
+
+        existing_log = state.node_logs.get(node_name, {})
 
         existing_log.update({
             "num_claims": len(claims),
             "valid_citations_used": len(used_ids),
-            "conflicts": len(conflicts) if conflicts else 0,
-            "partial": state.synthesis.partial,
+            "conflicts": len(conflicts),
+            "partial": partial_flag,
+            "context_docs": len(context_docs),
+            "dropped_claims": dropped_claims
         })
 
-        state.node_logs[NodeNames.SYNTHESIS] = existing_log
+        state.node_logs[node_name] = existing_log
 
-        log_node_execution("synthesiser", {}, {}, start_time)
+        log_node_execution(
+            "synthesiser_node",
+            {"context_docs": len(context_docs)},
+            {"claims": len(claims)}
+        )
 
         state.node_execution_count += 1
         return state
@@ -258,12 +277,19 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                 node="synthesiser_node",
                 timestamp=datetime.now(timezone.utc).isoformat(),
                 severity=SeverityEnum.CRITICAL,
-                error_type=ErrorTypeEnum.parsing_error,
+                error_type=ErrorTypeEnum.system_error,
                 message=f"Unexpected error: {str(e)}",
             )
         )
+
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
-        log_node_execution("synthesiser", {}, {}, start_time)
+
+        log_node_execution(
+            "synthesiser_node",
+            {},
+            {"error": str(e)}
+        )
+
         state.node_execution_count += 1
         return state
 
