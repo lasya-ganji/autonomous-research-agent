@@ -9,7 +9,7 @@ def hash_data(data):
         return "hash_error"
 
 
-def log_node_execution(node_name: str, input_data=None, output_data=None, *args, **kwargs):
+def log_node_execution(node_name: str, input_data=None, output_data=None):
 
     log = {
         "node": node_name,

@@ -1,24 +1,18 @@
 import time
 from functools import wraps
+from datetime import datetime, timezone
+
+from models.error_models import ErrorLog
+from models.enums import SeverityEnum, ErrorTypeEnum
 
 
 def trace_node(node_name: str):
-    """
-    Tracing decorator.
-
-    Goals:
-    - DO NOT overwrite node debug data
-    - Preserve all node-level logs
-    - Attach execution metadata safely
-    - Keep duration for UI 
-    """
 
     def decorator(func):
 
         @wraps(func)
         def wrapper(state, *args, **kwargs):
 
-            # Ensure state structure
             if getattr(state, "node_logs", None) is None:
                 state.node_logs = {}
 
@@ -38,13 +32,15 @@ def trace_node(node_name: str):
             except Exception as e:
                 status = "error"
 
-                error_payload = {
-                    "node": node_name,
-                    "error": str(e),
-                    "timestamp": time.time()
-                }
-
-                state.errors.append(error_payload)
+                state.errors.append(
+                    ErrorLog(
+                        node=node_name,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        severity=SeverityEnum.CRITICAL,
+                        error_type=ErrorTypeEnum.system_error,
+                        message=str(e),
+                    )
+                )
 
                 print(f"[TRACE ERROR] {node_name}: {str(e)}")
                 raise
@@ -55,15 +51,15 @@ def trace_node(node_name: str):
                 print(f"[TRACE END] {node_name} ({duration}s)")
 
                 existing_log = state.node_logs.get(node_name, {})
-
                 trace = existing_log.get("_trace", {})
 
                 total_duration = trace.get("total_duration_s", 0) + duration
                 run_count = trace.get("run_count", 0) + 1
 
                 trace.update({
-                    "total_duration_s": round(total_duration, 3),  
+                    "total_duration_s": round(total_duration, 3),
                     "run_count": run_count,
+                    "last_duration_s": duration,
                     "status": status
                 })
 
