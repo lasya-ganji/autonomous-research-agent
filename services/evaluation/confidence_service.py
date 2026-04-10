@@ -90,11 +90,6 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
     )
 
     # debug
-    print({
-        "quality": quality,
-        "coverage": coverage,
-        "agreement": agreement,
-        "diversity": diversity
-    })
+    print(f"[CONFIDENCE] quality={quality:.3f} coverage={coverage:.3f} agreement={agreement:.3f} diversity={diversity:.3f} => final={confidence:.3f}")
 
     return round(max(0.0, min(confidence, 1.0)), 3)

@@ -321,6 +321,8 @@ def score_results(results: List[SearchResult], query: str, state=None) -> List[S
         # clamp + stability
         r.quality_score = round(max(0.2, min(r.quality_score, 1.0)), 3)
         scored.append(r)
+        
+        print(f"[SCORING] URL={r.url} | rel={r.relevance_score:.3f} dom={r.domain_score:.3f} rec={r.recency_score:.3f} dep={r.depth_score:.3f} => quality={r.quality_score:.3f}")
 
     scored.sort(key=lambda x: x.quality_score, reverse=True)
 

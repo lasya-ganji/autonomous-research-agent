@@ -12,52 +12,30 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-def scrape_url(url: str) -> dict:
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=5)
+# Content control (IMPORTANT for LLM + cost)
+MAX_CONTENT_CHARS = 5000
+MIN_CONTENT_WORDS = 100
 
-        if response.status_code != 200:
-            return {"content": "", "publish_date": None}
 
-        html = response.text
-
-        # Extract content
-        extracted = trafilatura.extract(html)
-
-        # Extract metadata
-        metadata = trafilatura.extract_metadata(html)
-
-        content = ""
-        if extracted and len(extracted.strip()) > 200:
-            content = clean_text(extracted)
-        else:
-            content = fallback_bs4(html)
-
-        publish_date = None
-        if metadata and metadata.date:
-            publish_date = metadata.date
-
-        return {
-            "content": content,
-            "publish_date": publish_date
-        }
-
-    except Exception as e:
-        print(f"[SCRAPER ERROR] {e}")
-        return {"content": "", "publish_date": None}
-
-# Clean text function
 def clean_text(text: str) -> str:
-    return " ".join(text.split())  # remove extra spaces
-      # limit size for LLM
+    """
+    Normalize and trim content for safe LLM usage
+    """
+    if not text:
+        return ""
+
+    text = " ".join(text.split())  
+    return text[:MAX_CONTENT_CHARS]
 
 
-# BeautifulSoup fallback
 def fallback_bs4(html: str) -> str:
+    """
+    Fallback content extraction using BeautifulSoup
+    """
     try:
         soup = BeautifulSoup(html, "html.parser")
 
-        # Remove unwanted tags
+        # Remove noisy tags
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
             tag.decompose()
 
@@ -67,3 +45,59 @@ def fallback_bs4(html: str) -> str:
     except Exception as e:
         print(f"[BS4 FALLBACK ERROR] {e}")
         return ""
+
+
+def scrape_url(url: str) -> dict:
+    """
+    Scrape webpage content and metadata
+
+    Returns:
+    {
+        "content": str,
+        "publish_date": str | None
+    }
+    """
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=8)
+
+        if response.status_code != 200:
+            return {"content": "", "publish_date": None}
+
+        html = response.text
+
+        # -------------------------------
+        # PRIMARY EXTRACTION (trafilatura)
+        # -------------------------------
+        extracted = trafilatura.extract(html)
+        metadata = trafilatura.extract_metadata(html)
+
+        content = ""
+
+        if extracted:
+            word_count = len(extracted.split())
+
+            if word_count >= MIN_CONTENT_WORDS:
+                content = clean_text(extracted)
+
+        # -------------------------------
+        # FALLBACK EXTRACTION
+        # -------------------------------
+        if not content:
+            content = fallback_bs4(html)
+
+        # -------------------------------
+        # METADATA
+        # -------------------------------
+        publish_date = None
+        if metadata and getattr(metadata, "date", None):
+            publish_date = metadata.date
+
+        return {
+            "content": content,
+            "publish_date": publish_date
+        }
+
+    except Exception as e:
+        print(f"[SCRAPER ERROR] URL: {url} | ERROR: {e}")
+        return {"content": "", "publish_date": None}

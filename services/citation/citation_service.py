@@ -14,50 +14,35 @@ def validate_url(url: str) -> CitationStatus:
     if not url:
         return CitationStatus.broken
 
-
-    # CACHE HIT
-
     if url in _url_cache:
         return _url_cache[url]
 
     try:
-     
-    
         resp = requests.get(
             url,
-            timeout=5,
+            timeout=8,
             allow_redirects=True,
-            headers={
-                "User-Agent": "Mozilla/5.0"
-            }
+            headers={"User-Agent": "Mozilla/5.0"}
         )
 
         status_code = resp.status_code
 
         if status_code == 200:
             status = CitationStatus.valid
-
         elif 300 <= status_code < 400:
             status = CitationStatus.stale
-
         elif status_code >= 400:
             status = CitationStatus.broken
-
         else:
             status = CitationStatus.stale
 
     except requests.Timeout:
-
         status = CitationStatus.stale
 
     except requests.RequestException:
-        status = CitationStatus.stale
-
-
-    # CACHE STORE
+        status = CitationStatus.broken   
 
     _url_cache[url] = status
-
     return status
 
 
