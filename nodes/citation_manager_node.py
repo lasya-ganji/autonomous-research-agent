@@ -13,6 +13,12 @@ from observability.tracing import trace_node
 from utils.logger import log_node_execution
 from config.constants.node_names import NodeNames
 
+from config.constants.citation_constants import (
+    SIMILARITY_THRESHOLD,
+    VERIFICATION_THRESHOLD,
+    MIN_REQUIRED_CITATIONS
+)
+
 
 def normalize_citation_id(cid: str) -> str:
     cid = str(cid).strip()
@@ -24,10 +30,8 @@ def normalize_citation_id(cid: str) -> str:
 def text_overlap(a: str, b: str) -> float:
     a_words = set((a or "").lower().split())
     b_words = set((b or "").lower().split())
-
     if not a_words or not b_words:
         return 0.0
-
     return len(a_words & b_words) / len(a_words | b_words)
 
 
@@ -59,7 +63,6 @@ def compute_similarity_score(claim_text: str, chunk: str) -> float:
         return overlap
 
     semantic = cosine_similarity(emb1, emb2)
-
     return max(overlap, semantic)
 
 
@@ -71,17 +74,16 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     # -------------------------------
     if state.errors is None:
         state.errors = []
-
     if state.node_logs is None:
         state.node_logs = {}
 
     if not hasattr(state, "failure_counts") or state.failure_counts is None:
-        state.failure_counts = {
-            "search_failures": 0,
-            "parsing_failures": 0,
-            "low_confidence": 0,
-            "citation_failures": 0,
-        }
+        state.failure_counts = {}
+
+    state.failure_counts.setdefault("search_failures", 0)
+    state.failure_counts.setdefault("parsing_failures", 0)
+    state.failure_counts.setdefault("low_confidence", 0)
+    state.failure_counts.setdefault("citation_failures", 0)
 
     if state.citations is None:
         state.errors.append(
@@ -104,7 +106,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     }
 
     # -------------------------------
-    # 1. URL VALIDATION (OPTIMIZED)
+    # URL VALIDATION
     # -------------------------------
     for cid, citation in state.citations.items():
         try:
@@ -118,7 +120,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                     node="citation_manager_node",
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     severity=SeverityEnum.WARNING,
-                    error_type=ErrorTypeEnum.search_failure,
+                    error_type=ErrorTypeEnum.parsing_error,
                     message=f"URL validation failed for {cid}: {str(e)}",
                 )
             )
@@ -128,7 +130,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     claim_debug = {}
 
     # -------------------------------
-    # 2. CLAIM VALIDATION (RELAXED)
+    # CLAIM VALIDATION
     # -------------------------------
     if state.synthesis and state.synthesis.claims:
 
@@ -158,17 +160,13 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                     if score > best_score:
                         best_score = score
 
-                # RELAXED THRESHOLD (KEY FIX)
-                if best_score > 0.25:
+                if best_score > SIMILARITY_THRESHOLD:
                     cleaned_ids.append(cid)
                     citation_scores[cid] = best_score
                 else:
                     hallucinated.append(cid)
                     dropped_citations += 1
 
-            # -------------------------------
-            # CLAIM DECISION
-            # -------------------------------
             if citation_scores:
                 avg_score = sum(citation_scores.values()) / len(citation_scores)
 
@@ -177,8 +175,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                 claim.citation_score_map = citation_scores
                 claim.hallucinated_citations = hallucinated
 
-                # RELAXED VERIFICATION
-                claim.verified = avg_score > 0.3
+                claim.verified = avg_score > VERIFICATION_THRESHOLD
 
                 if claim.verified:
                     used_ids.update(cleaned_ids)
@@ -202,14 +199,19 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     state.used_citation_ids = used_ids
 
     # -------------------------------
-    # 3. PARTIAL HANDLING
+    # PARTIAL PROPAGATION
     # -------------------------------
     if state.synthesis:
-        if len(used_ids) < 2:
+        if len(used_ids) < MIN_REQUIRED_CITATIONS:
             state.synthesis.partial = True
 
+        if state.synthesis.partial:
+            state.is_partial = True
+
+    print(f"[CITATION] Used: {len(used_ids)} | Dropped: {dropped_citations}")
+
     # -------------------------------
-    # 4. METRICS
+    # METRICS
     # -------------------------------
     num_valid = sum(1 for c in state.citations.values() if c.status == CitationStatus.valid)
     num_broken = sum(1 for c in state.citations.values() if c.status == CitationStatus.broken)
@@ -217,18 +219,19 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
 
     node_name = NodeNames.CITATION_MANAGER
     existing_log = state.node_logs.get(node_name, {})
-    
+
     existing_log.update({
-        "total_citations": len(state.citations),
+        "total_sources": len(state.citations),
         "valid": num_valid,
         "broken": num_broken,
         "stale": num_stale,
         "used": len(used_ids),
         "dropped": dropped_citations,
         "claim_debug": claim_debug,
-        "failure_counts": state.failure_counts
+        "failure_counts": dict(state.failure_counts),
+        "errors_count": len(state.errors)
     })
-    
+
     state.node_logs[node_name] = existing_log
 
     log_node_execution(

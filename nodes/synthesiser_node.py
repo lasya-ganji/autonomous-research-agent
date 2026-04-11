@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 import json
-import time
-from typing import Dict, List, Set, Tuple
+from typing import List
 
 from models.state import ResearchState
 from models.synthesis_models import SynthesisModel, Claim
@@ -17,6 +16,16 @@ from config.constants.node_names import NodeNames
 
 from services.system.cost_tracker import calculate_cost
 
+from config.constants.synthesis_constants import (
+    MAX_SYNTHESIS_RESULTS,
+    MAX_CHUNKS_PER_DOC,
+    MAX_CONTEXT_DOCS,
+    MAX_CONTEXT_LENGTH,
+    MAX_CHUNK_LENGTH,
+    MIN_CONTENT_LENGTH,
+    MIN_CITATIONS_REQUIRED
+)
+
 
 def text_overlap(a: str, b: str) -> float:
     a_words = set((a or "").lower().split())
@@ -30,12 +39,13 @@ def text_overlap(a: str, b: str) -> float:
 def synthesiser_node(state: ResearchState) -> ResearchState:
 
     try:
-        # Safety init
+        # -------------------------------
+        # SAFETY INIT
+        # -------------------------------
         if state.errors is None:
             state.errors = []
         if state.node_logs is None:
             state.node_logs = {}
-
 
         # -------------------------------
         # FILTER VALID RESULTS
@@ -57,6 +67,8 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     message="No valid search results for synthesis",
                 )
             )
+
+            state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
@@ -67,7 +79,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             valid_results,
             key=lambda x: getattr(x, "quality_score", 0),
             reverse=True
-        )[:12]
+        )[:MAX_SYNTHESIS_RESULTS]
 
         # -------------------------------
         # BUILD CONTEXT
@@ -78,13 +90,13 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         for r in valid_results:
             content = r.content or r.snippet
-            if not content or len(content.strip()) < 80:
+            if not content or len(content.strip()) < MIN_CONTENT_LENGTH:
                 continue
 
             chunks = chunk_text(content) if r.content else [content]
 
             scored_chunks = [(c, text_overlap(state.query, c)) for c in chunks]
-            top_chunks = sorted(scored_chunks, key=lambda x: x[1], reverse=True)[:3]
+            top_chunks = sorted(scored_chunks, key=lambda x: x[1], reverse=True)[:MAX_CHUNKS_PER_DOC]
 
             selected_chunks = [c[0] for c in top_chunks if c[0]]
             if not selected_chunks:
@@ -94,13 +106,13 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.citation_chunks[r.citation_id] = selected_chunks
 
         i = 0
-        while len(context_docs) < 25:
+        while len(context_docs) < MAX_CONTEXT_DOCS:
             added = False
             for cid, chunks in doc_chunks:
                 if i < len(chunks):
-                    context_docs.append(f"{cid} {chunks[i][:1200]}")
+                    context_docs.append(f"{cid} {chunks[i][:MAX_CHUNK_LENGTH]}")
                     added = True
-                    if len(context_docs) >= 25:
+                    if len(context_docs) >= MAX_CONTEXT_DOCS:
                         break
             if not added:
                 break
@@ -116,11 +128,15 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     message="No usable context built for synthesis",
                 )
             )
+
+            state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
         context_docs = list(dict.fromkeys(context_docs))
-        context_str = "\n\n".join(context_docs)[:22000]
+        context_str = "\n\n".join(context_docs)[:MAX_CONTEXT_LENGTH]
+
+        print(f"[SYNTHESIS] Context docs built: {len(context_docs)}")
 
         # -------------------------------
         # LLM CALL
@@ -132,14 +148,19 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         )
 
         res = call_llm(prompt=prompt, temperature=0)
+
         response_content = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
-        state.total_tokens += usage.get("total_tokens", 0)
-        state.total_cost += calculate_cost(
+        # Node cost (consistent with other nodes)
+        node_tokens = usage.get("total_tokens", 0)
+        node_cost = calculate_cost(
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0)
         )
+
+        state.total_tokens += node_tokens
+        state.total_cost += node_cost
 
         if state.total_cost > state.cost_limit:
             state.abort = True
@@ -196,7 +217,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
-                # STRICT GROUNDING
                 if not filtered_ids:
                     dropped_claims += 1
                     continue
@@ -230,12 +250,18 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         conflicts = parsed.get("conflicts", [])
 
         # -------------------------------
-        # FINAL STATE
+        # PARTIAL LOGIC (PRD ALIGNED)
         # -------------------------------
+        evaluator_failed = state.node_logs.get("evaluator_node", {}).get("all_failed", False)
+
         partial_flag = (
             len(claims) == 0 or
-            len(used_ids) < 2
+            len(used_ids) < MIN_CITATIONS_REQUIRED or
+            evaluator_failed
         )
+
+        if partial_flag:
+            state.is_partial = True
 
         state.used_citation_ids = used_ids
         state.synthesis = SynthesisModel(
@@ -248,7 +274,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         # OBSERVABILITY
         # -------------------------------
         node_name = NodeNames.SYNTHESIS
-
         existing_log = state.node_logs.get(node_name, {})
 
         existing_log.update({
@@ -257,7 +282,11 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             "conflicts": len(conflicts),
             "partial": partial_flag,
             "context_docs": len(context_docs),
-            "dropped_claims": dropped_claims
+            "dropped_claims": dropped_claims,
+            "errors_count": len(state.errors),
+            "node_tokens": node_tokens,
+            "node_cost": round(node_cost, 4),
+            "total_cost": round(state.total_cost, 4)
         })
 
         state.node_logs[node_name] = existing_log
@@ -282,6 +311,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
         )
 
+        state.is_partial = True
         state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
 
         log_node_execution(
@@ -292,4 +322,3 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         state.node_execution_count += 1
         return state
-
