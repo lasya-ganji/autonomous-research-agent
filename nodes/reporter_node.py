@@ -1,6 +1,5 @@
-import time
 from datetime import datetime, timezone
-from typing import Dict, List, Set
+from typing import Dict, Set
 
 from observability.tracing import trace_node
 
@@ -13,7 +12,10 @@ from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
 from config.constants.node_names import NodeNames
+
 from services.system.cost_tracker import calculate_cost
+
+from config.constants.reporter_constants import MIN_REQUIRED_CITATIONS
 
 
 @trace_node(NodeNames.REPORTER)
@@ -48,7 +50,8 @@ def reporter_node(state: ResearchState) -> ResearchState:
             state.node_logs[NodeNames.REPORTER] = {
                 "report_generated": False,
                 "citations_used": 0,
-                "claims": 0
+                "claims": 0,
+                "errors_count": len(state.errors)
             }
 
             log_node_execution("reporter_node", {}, {})
@@ -66,7 +69,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         # -------------------------------
         # COLLECT USED IDS
         # -------------------------------
-        used_ids = set()
+        used_ids: Set[str] = set()
         for claim in state.synthesis.claims:
             for cid in getattr(claim, "citation_ids", []):
                 if cid in valid_citations:
@@ -81,7 +84,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         state.citation_mapping = id_mapping
 
         # -------------------------------
-        # BUILD SYNTHESIS TEXT (FORMAT ONLY)
+        # BUILD SYNTHESIS TEXT
         # -------------------------------
         synthesis_lines = []
         unverified_count = 0
@@ -110,6 +113,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
         for cid in sorted_ids:
             c = valid_citations[cid]
+
             entry = {
                 "id": id_mapping[cid],
                 "url": c.url,
@@ -117,6 +121,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 "quality_score": getattr(c, "quality_score", None),
                 "accessed_at": datetime.now().isoformat(),
             }
+
             citations_list.append(entry)
             citations_text_lines.append(
                 f"{entry['id']} {entry['title']} - {entry['url']}"
@@ -125,7 +130,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         citations_text = "\n".join(citations_text_lines)
 
         # -------------------------------
-        # PROMPT (FORMATTER ONLY)
+        # LLM FORMATTER
         # -------------------------------
         prompt = (
             load_prompt("reporter.txt")
@@ -135,17 +140,27 @@ def reporter_node(state: ResearchState) -> ResearchState:
         )
 
         res = call_llm(prompt=prompt, temperature=0.1)
+
         response = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
+        print(f"[REPORT] Generated length: {len(response)}")
+        print(f"[REPORT] Citations used: {len(used_ids)} | Unverified: {unverified_count}")
+
         # -------------------------------
-        # COST TRACKING
+        # NODE COST
         # -------------------------------
-        state.total_tokens += usage.get("total_tokens", 0)
-        state.total_cost += calculate_cost(
+        node_tokens = usage.get("total_tokens", 0)
+        node_cost = calculate_cost(
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0)
         )
+
+        # -------------------------------
+        # GLOBAL COST
+        # -------------------------------
+        state.total_tokens += node_tokens
+        state.total_cost += node_cost
 
         if state.total_cost > state.cost_limit:
             state.abort = True
@@ -178,13 +193,16 @@ def reporter_node(state: ResearchState) -> ResearchState:
             return state
 
         # -------------------------------
-        # FINAL PARTIAL FLAG (STRICT)
+        # FINAL PARTIAL FLAG
         # -------------------------------
         partial_flag = (
             state.synthesis.partial or
             state.abort or
-            len(used_ids) < 2
+            len(used_ids) < MIN_REQUIRED_CITATIONS
         )
+
+        if partial_flag:
+            state.is_partial = True
 
         # -------------------------------
         # FINAL REPORT
@@ -208,13 +226,19 @@ def reporter_node(state: ResearchState) -> ResearchState:
         # -------------------------------
         node_name = NodeNames.REPORTER
         existing_log = state.node_logs.get(node_name, {})
+
         existing_log.update({
             "report_generated": True,
             "citations_used": len(used_ids),
             "claims": len(state.synthesis.claims),
             "unverified_claims": unverified_count,
-            "partial": partial_flag
+            "partial": partial_flag,
+            "errors_count": len(state.errors),
+            "node_tokens": node_tokens,
+            "node_cost": round(node_cost, 4),
+            "total_cost": round(state.total_cost, 4)
         })
+
         state.node_logs[node_name] = existing_log
 
         log_node_execution(
