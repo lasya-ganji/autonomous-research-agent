@@ -3,28 +3,32 @@ from datetime import datetime, timezone
 from typing import Dict, List
 
 from config.constants.node_names import NodeNames
+from config.constants.evaluator_constants import (
+    CONFIDENCE_THRESHOLD,
+    LOW_CONFIDENCE_THRESHOLD,
+    MAX_SEARCH_RETRIES,
+    MAX_REPLANS
+)
+
 from models.evaluation_models import EvaluationResult, StepEvaluation
 from models.enums import ErrorTypeEnum, SeverityEnum
 from models.error_models import ErrorLog
 from models.state import ResearchState
+
 from observability.tracing import trace_node
+
 from services.evaluation.confidence_service import compute_confidence
 from services.evaluation.scoring_service import score_results
+
 from utils.logger import log_node_execution
-
-
-# CONFIG
-THRESHOLD = 0.6
-LOW_CONF_THRESHOLD = 0.35
-MAX_SEARCH_RETRIES = 1
-MAX_REPLANS = 1
-CONFIDENCE_IMPROVEMENT_EPS = 0.02
 
 
 @trace_node(NodeNames.EVALUATOR)
 def evaluator_node(state: ResearchState) -> ResearchState:
 
-    # Safety init
+    # -------------------------------
+    # SAFETY INIT
+    # -------------------------------
     if state.errors is None:
         state.errors = []
     if state.node_logs is None:
@@ -35,7 +39,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             "parsing_failures": 0,
             "low_confidence": 0,
         }
-
 
     input_data: Dict = {
         "num_steps": len(state.research_plan),
@@ -48,7 +51,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         step_evaluations: List[StepEvaluation] = []
         failed_steps = 0
         total_confidence = 0.0
-        step_debug = {}
 
         # -------------------------------
         # PER-STEP EVALUATION
@@ -62,9 +64,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             passed = False
             failure_reason = ""
 
-            # -------------------------------
-            # NO RESULTS
-            # -------------------------------
             if not results:
                 failure_reason = "no results"
                 state.failure_counts["search_failures"] += 1
@@ -80,9 +79,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 )
 
             else:
-                # -------------------------------
-                # SCORING (IMPORTANT: pass state)
-                # -------------------------------
                 try:
                     scored_results = score_results(results, query, state)
                     state.search_results[step_id] = scored_results
@@ -93,22 +89,16 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                             timestamp=datetime.now(timezone.utc).isoformat(),
                             severity=SeverityEnum.ERROR,
                             error_type=ErrorTypeEnum.system_error,
-                            message=f"Scoring failed: {str(e)}",
+                            message=f"Scoring failed (step {step_id}): {str(e)}",
                         )
                     )
                     scored_results = []
 
-                # -------------------------------
-                # ALL FILTERED
-                # -------------------------------
                 if not scored_results:
                     failure_reason = "all results filtered"
                     state.failure_counts["low_confidence"] += 1
 
                 else:
-                    # -------------------------------
-                    # CONFIDENCE
-                    # -------------------------------
                     try:
                         confidence = compute_confidence(scored_results, query)
                         confidence = max(0.0, min(confidence, 1.0))
@@ -119,29 +109,24 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                                 timestamp=datetime.now(timezone.utc).isoformat(),
                                 severity=SeverityEnum.ERROR,
                                 error_type=ErrorTypeEnum.system_error,
-                                message=f"Confidence failed: {str(e)}",
+                                message=f"Confidence failed (step {step_id}): {str(e)}",
                             )
                         )
                         confidence = 0.0
 
-                    passed = confidence >= THRESHOLD
+                    passed = confidence >= CONFIDENCE_THRESHOLD
 
                     if not passed:
                         state.failure_counts["low_confidence"] += 1
-                        if confidence < LOW_CONF_THRESHOLD:
-                            failure_reason = "very low confidence"
-                        else:
-                            failure_reason = "low confidence"
+                        failure_reason = (
+                            "very low confidence"
+                            if confidence < LOW_CONFIDENCE_THRESHOLD
+                            else "low confidence"
+                        )
 
             total_confidence += confidence
             if not passed:
                 failed_steps += 1
-
-            step_debug[step_id] = {
-                "confidence": confidence,
-                "passed": passed,
-                "reason": failure_reason
-            }
 
             step_evaluations.append(
                 StepEvaluation(
@@ -160,44 +145,40 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
         prev_conf = state.overall_confidence or 0.0
         improvement = avg_confidence - prev_conf
-        no_improvement = abs(improvement) <= CONFIDENCE_IMPROVEMENT_EPS
+        no_improvement = improvement <= 0
 
-        low_confidence = avg_confidence < THRESHOLD
+        low_confidence = avg_confidence < CONFIDENCE_THRESHOLD
         all_failed = failed_steps == total_steps and total_steps > 0
 
         # -------------------------------
-        # DECISION LOGIC (FINAL CORRECT)
+        # DECISION LOGIC
         # -------------------------------
         if total_steps == 0:
             decision = "replan"
             state.failure_reason = "no steps evaluated"
 
-        elif avg_confidence >= THRESHOLD and failed_steps == 0:
+        elif avg_confidence >= CONFIDENCE_THRESHOLD:
             decision = "proceed"
             state.failure_reason = ""
 
         else:
-            # GLOBAL retry first
             if state.search_retry_count < MAX_SEARCH_RETRIES:
                 decision = "retry"
                 state.search_retry_count += 1
 
-                if all_failed:
-                    state.failure_reason = "all steps failed"
-                elif low_confidence:
-                    state.failure_reason = "low confidence"
-                else:
-                    state.failure_reason = "partial failure"
+                state.failure_reason = (
+                    "all steps failed" if all_failed
+                    else "low confidence" if low_confidence
+                    else "partial failure"
+                )
 
-            # THEN replan
             elif state.replan_count < MAX_REPLANS:
                 decision = "replan"
                 state.replan_count += 1
                 state.failure_reason = "retry exhausted"
 
-            # FINAL fallback
             else:
-                decision = "proceed"
+                decision = "forced_proceed"
                 state.failure_reason = "max retries and replans exhausted"
 
         # -------------------------------
@@ -209,7 +190,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         )
         state.overall_confidence = avg_confidence
 
-        # Update citation scores
         for results in state.search_results.values():
             for r in results:
                 cid = getattr(r, "citation_id", None)
@@ -217,21 +197,22 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                     state.citations[cid].quality_score = round(r.quality_score, 3)
 
         # -------------------------------
-        # OBSERVABILITY (IMPORTANT)
+        # DEBUG (UI CLEAN)
         # -------------------------------
         node_name = NodeNames.EVALUATOR
-
         existing_log = state.node_logs.get(node_name, {})
 
         existing_log.update({
             "decision": decision,
-            "avg_confidence": avg_confidence,
+            "avg_confidence": round(avg_confidence, 4),
             "failed_steps": failed_steps,
             "total_steps": total_steps,
-            "no_improvement": no_improvement,
             "improvement": round(improvement, 4),
-            "step_debug": step_debug,
-            "failure_counts": state.failure_counts
+            "no_improvement": no_improvement,
+            "low_confidence": low_confidence,
+            "all_failed": all_failed,
+            "failure_counts": dict(state.failure_counts),
+            "errors_count": len(state.errors),
         })
 
         state.node_logs[node_name] = existing_log
@@ -239,7 +220,10 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         log_node_execution(
             "evaluator_node",
             input_data,
-            {"decision": decision, "avg_confidence": avg_confidence}
+            {
+                "decision": decision,
+                "avg_confidence": round(avg_confidence, 4),
+            }
         )
 
         state.node_execution_count += 1
@@ -260,13 +244,13 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         state.overall_confidence = state.overall_confidence or 0.0
 
         node_name = NodeNames.EVALUATOR
-
         existing_log = state.node_logs.get(node_name, {})
 
         existing_log.update({
             "decision": "proceed",
             "avg_confidence": state.overall_confidence,
-            "error": str(e)
+            "error": str(e),
+            "errors_count": len(state.errors),
         })
 
         state.node_logs[node_name] = existing_log

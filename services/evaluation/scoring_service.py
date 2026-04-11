@@ -9,21 +9,17 @@ import numpy as np
 from collections import Counter
 from services.retrieval.embedding_service import get_embedding
 
-
-DEFAULT_WEIGHTS = {
-    "relevance": 0.5,
-    "recency": 0.2,
-    "domain": 0.2,
-    "depth": 0.1
-}
-
-
-MIN_THRESHOLDS = {
-    "relevance": 0.35,
-    "recency": 0.1,
-    "domain": 0.1,
-    "depth": 0.05
-}
+from config.constants.scoring_constants import (
+    DEFAULT_WEIGHTS,
+    MIN_THRESHOLDS,
+    SEMANTIC_WEIGHT,
+    KEYWORD_WEIGHT,
+    TITLE_WEIGHT,
+    SEMANTIC_BOOST_THRESHOLD,
+    KEYWORD_BOOST_THRESHOLD,
+    TITLE_BOOST_THRESHOLD,
+    MAX_TF_NORMALIZATION
+)
 
 
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
@@ -56,18 +52,21 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
     query_terms = query.split()
     doc_terms = doc_text.split()
 
-    # KEYWORD SCORE (IMPROVED)
+    # -------------------------------
+    # KEYWORD SCORE 
+    # -------------------------------
     doc_tf = Counter(doc_terms)
 
     keyword_score = 0.0
     for term in query_terms:
         if term in doc_tf:
-            # controlled TF boost (avoid explosion)
-            keyword_score += min(doc_tf[term] / 3, 1.0)
+            keyword_score += min(doc_tf[term] / MAX_TF_NORMALIZATION, 1.0)
 
-    keyword_score = keyword_score / (len(query_terms) or 1)
+    keyword_score = keyword_score / max(len(query_terms), 1)
 
+    # -------------------------------
     # SEMANTIC SCORE
+    # -------------------------------
     if query_emb is None:
         query_emb = get_embedding(query)
 
@@ -80,38 +79,38 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
         denom = np.linalg.norm(q) * np.linalg.norm(d)
         semantic_score = float(np.dot(q, d) / denom) if denom > 0 else 0.0
 
-        # normalize safely
         semantic_score = max(0.0, min(semantic_score, 1.0))
     else:
         semantic_score = 0.0
 
-    # TITLE MATCH SCORE
+    # -------------------------------
+    # TITLE SCORE
+    # -------------------------------
     title_words = set(title.lower().split())
     query_words = set(query_terms)
 
     title_score = len(query_words & title_words) / (len(query_words) or 1)
 
-    # BASE COMBINATION
     base = (
-        0.65 * semantic_score +
-        0.25 * keyword_score +
-        0.10 * title_score
+        SEMANTIC_WEIGHT * semantic_score +
+        KEYWORD_WEIGHT * keyword_score +
+        TITLE_WEIGHT * title_score
     )
 
-    # CONTROLLED BOOSTING
-    if semantic_score > 0.6 and keyword_score > 0.5:
+    if semantic_score > SEMANTIC_BOOST_THRESHOLD and keyword_score > KEYWORD_BOOST_THRESHOLD:
         base += 0.05
 
-    if semantic_score > 0.6 and title_score > 0.4:
+    if semantic_score > SEMANTIC_BOOST_THRESHOLD and title_score > TITLE_BOOST_THRESHOLD:
         base += 0.03
 
     if keyword_score > 0.7 and semantic_score < 0.3:
         base -= 0.05
 
-    # FINAL NORMALIZATION
+    # FINAL CLAMP
     base = max(0.0, min(base, 1.0))
 
     return round(base, 3)
+
 
 
 HIGH_AUTHORITY = [
@@ -144,43 +143,26 @@ LOW_QUALITY = [
 def compute_domain(result: SearchResult) -> float:
     try:
         domain = urlparse(str(result.url)).netloc.lower()
-
-        # remove www
         domain = domain.replace("www.", "")
 
-        # HIGH AUTHORITY
         if any(d in domain for d in HIGH_AUTHORITY):
             return 0.95
-
-        # RESEARCH
         if any(d in domain for d in RESEARCH_PLATFORMS):
             return 0.9
-
-        # GOV / EDU fallback
         if domain.endswith(".gov") or domain.endswith(".edu"):
             return 0.93
-
-        # TRUSTED KNOWLEDGE
         if any(d in domain for d in TRUSTED_KNOWLEDGE):
             return 0.85
-
-        # NEWS
         if any(d in domain for d in NEWS_SOURCES):
             return 0.8
-
-        # TECH BLOGS
         if any(d in domain for d in TECH_BLOGS):
             return 0.7
-
-        # LOW QUALITY
         if any(d in domain for d in LOW_QUALITY):
             return 0.5
-
-        # Heuristic fallback (IMPORTANT)
         if any(x in domain for x in ["blog", "dev", "tech"]):
             return 0.65
 
-        return 0.75  
+        return 0.75
 
     except:
         return 0.5
@@ -319,7 +301,7 @@ def score_results(results: List[SearchResult], query: str, state=None) -> List[S
         )
 
         # clamp + stability
-        r.quality_score = round(max(0.2, min(r.quality_score, 1.0)), 3)
+        r.quality_score = round(max(0.3, min(r.quality_score, 1.0)), 3) 
         scored.append(r)
         
         print(f"[SCORING] URL={r.url} | rel={r.relevance_score:.3f} dom={r.domain_score:.3f} rec={r.recency_score:.3f} dep={r.depth_score:.3f} => quality={r.quality_score:.3f}")
