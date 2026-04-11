@@ -1,6 +1,7 @@
 import requests
 import trafilatura
 from bs4 import BeautifulSoup
+from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS
 
 # Real browser-like headers
 HEADERS = {
@@ -12,9 +13,6 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Content control (IMPORTANT for LLM + cost)
-MAX_CONTENT_CHARS = 5000
-MIN_CONTENT_WORDS = 100
 
 
 def clean_text(text: str) -> str:
@@ -62,6 +60,7 @@ def scrape_url(url: str) -> dict:
         response = requests.get(url, headers=HEADERS, timeout=8)
 
         if response.status_code != 200:
+            print(f"[SCRAPER WARNING] Non-200 response: {url} | status={response.status_code}")
             return {"content": "", "publish_date": None}
 
         html = response.text
@@ -71,6 +70,9 @@ def scrape_url(url: str) -> dict:
         # -------------------------------
         extracted = trafilatura.extract(html)
         metadata = trafilatura.extract_metadata(html)
+        
+        if not extracted:
+            print(f"[SCRAPER DEBUG] Trafilatura returned empty: {url}")
 
         content = ""
 
@@ -79,13 +81,19 @@ def scrape_url(url: str) -> dict:
 
             if word_count >= MIN_CONTENT_WORDS:
                 content = clean_text(extracted)
+            else:
+                print(f"[SCRAPER DEBUG] Low word count ({word_count}) → fallback: {url}")
 
         # -------------------------------
         # FALLBACK EXTRACTION
         # -------------------------------
         if not content:
+            print(f"[SCRAPER FALLBACK] Using BS4 for: {url}")
             content = fallback_bs4(html)
 
+        
+        if not content or len(content.split()) < MIN_CONTENT_WORDS:
+            print(f"[SCRAPER ERROR] No usable content: {url}")
         # -------------------------------
         # METADATA
         # -------------------------------

@@ -1,5 +1,6 @@
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 
 from models.state import ResearchState
 from models.search_models import SearchResult
@@ -22,17 +23,20 @@ from utils.logger import log_node_execution
 from observability.tracing import trace_node
 from config.constants.node_names import NodeNames
 
-from urllib.parse import urlparse
+from config.constants.scraper_constants import MIN_CONTENT_WORDS
+from config.constants.search_constants import (
+    MAX_SEARCH_RETRIES,
+    BACKOFF_BASE,
+    MAX_RESULTS_PER_STEP,
+    MAX_PER_DOMAIN,
+    MAX_SCRAPES
+)
 
 
-MAX_SEARCH_RETRIES = 3
-BACKOFF_BASE = 1 
-
-
+# -------------------------------
+# SEARCH WITH RETRY
+# -------------------------------
 def _search_with_retry(query, state):
-    """
-    Retry with exponential backoff
-    """
     for attempt in range(MAX_SEARCH_RETRIES):
         try:
             results = search_tool(query)
@@ -47,14 +51,12 @@ def _search_with_retry(query, state):
                     timestamp=datetime.now().isoformat(),
                     severity=SeverityEnum.WARNING,
                     error_type=ErrorTypeEnum.search_failure,
-                    message=f"Search attempt {attempt+1} failed: {str(e)}"
+                    message=f"Search attempt {attempt+1} failed for query='{query}': {str(e)}"
                 )
             )
 
-        # exponential backoff
         time.sleep(BACKOFF_BASE * (2 ** attempt))
 
-    # all retries failed
     state.failure_counts["search_failures"] += 1
     return []
 
@@ -62,17 +64,17 @@ def _search_with_retry(query, state):
 @trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
 
+    # -------------------------------
+    # SAFETY INIT
+    # -------------------------------
     if state.errors is None:
         state.errors = []
     if state.node_logs is None:
         state.node_logs = {}
-    if not hasattr(state, "failure_counts") or state.failure_counts is None:
-        state.failure_counts = {
-            "search_failures": 0,
-            "parsing_failures": 0,
-            "low_confidence": 0,
-        }
 
+    # ⚠️ Keeping as-is (no logic change)
+    state.failure_counts["parsing_failures"] = 0
+    state.failure_counts["search_failures"] = 0
 
     state.search_results = {}
 
@@ -82,21 +84,37 @@ def searcher_node(state: ResearchState) -> ResearchState:
     step_status = {}
 
     try:
+        if not state.research_plan:
+            state.errors.append(
+                ErrorLog(
+                    node="searcher_node",
+                    timestamp=datetime.now().isoformat(),
+                    severity=SeverityEnum.ERROR,
+                    error_type=ErrorTypeEnum.parsing_error,
+                    message="No research plan available"
+                )
+            )
+            return state
+
         steps = sorted(state.research_plan, key=lambda x: x.priority)
 
         for step in steps:
             step_id = step.step_id
             query = step.question
 
+            print(f"[SEARCH] Step {step_id} Query: {query}")
+
             # -------------------------------
-            # SEARCH WITH RETRY
+            # SEARCH
             # -------------------------------
             raw_results = _search_with_retry(query, state)
 
-            # fallback query retry
             if not raw_results:
                 fallback_query = " ".join(query.split()[:6])
+                print(f"[SEARCH RETRY] Using fallback query: {fallback_query}")
                 raw_results = _search_with_retry(fallback_query, state)
+
+            print(f"[SEARCH] Results fetched: {len(raw_results)}")
 
             if not raw_results:
                 step_status[step_id] = "failed"
@@ -123,7 +141,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             unique_results = []
             domain_count = {}
-            MAX_PER_DOMAIN = 2
 
             for r in deduped_results:
                 url = str(getattr(r, "url", ""))
@@ -144,10 +161,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                 unique_results.append((r, norm_url))
 
-            unique_results = unique_results[:5]
+            unique_results = unique_results[:MAX_RESULTS_PER_STEP]
+
+            print(f"[DEDUP] Step {step_id}: {len(unique_results)} results")
 
             structured_results = []
-            MAX_SCRAPES = 3
 
             for i, (r, norm_url) in enumerate(unique_results):
 
@@ -162,7 +180,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 # -------------------------------
                 try:
                     status = validate_url(norm_url)
-                except Exception:
+                except Exception as e:
+                    state.failure_counts["parsing_failures"] += 1
                     status = CitationStatus.broken
 
                     state.errors.append(
@@ -170,8 +189,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
                             node="searcher_node",
                             timestamp=datetime.now().isoformat(),
                             severity=SeverityEnum.WARNING,
-                            error_type=ErrorTypeEnum.parsing_error,
-                            message=f"URL validation failed: {norm_url}"
+                            error_type=ErrorTypeEnum.system_error,
+                            message=f"URL validation failed: {norm_url} | {str(e)}"
                         )
                     )
 
@@ -186,14 +205,32 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         scraped = scrape_url(norm_url)
                         content = scraped.get("content")
                         publish_date = scraped.get("publish_date")
-                    except Exception:
+
+                        if not content or len(content.split()) < MIN_CONTENT_WORDS:
+                            state.failure_counts["parsing_failures"] += 1
+
+                            print(f"[SEARCH PARSE FAIL] {norm_url}")
+
+                            state.errors.append(
+                                ErrorLog(
+                                    node="searcher_node",
+                                    timestamp=datetime.now().isoformat(),
+                                    severity=SeverityEnum.WARNING,
+                                    error_type=ErrorTypeEnum.parsing_error,
+                                    message=f"No usable content: {norm_url}"
+                                )
+                            )
+
+                    except Exception as e:
+                        state.failure_counts["parsing_failures"] += 1
+
                         state.errors.append(
                             ErrorLog(
                                 node="searcher_node",
                                 timestamp=datetime.now().isoformat(),
                                 severity=SeverityEnum.WARNING,
-                                error_type=ErrorTypeEnum.timeout,
-                                message=f"Scrape failed: {norm_url}"
+                                error_type=ErrorTypeEnum.system_error,
+                                message=f"Scrape failed: {norm_url} | {str(e)}"
                             )
                         )
 
@@ -224,6 +261,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 )
 
             state.search_results[step_id] = structured_results
+            print(f"[SEARCH] Step {step_id} status: {step_status[step_id]}")
 
     except Exception as e:
         state.failure_counts["search_failures"] += 1
@@ -239,7 +277,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
         )
 
     # -------------------------------
-    # OBSERVABILITY (IMPORTANT)
+    # OBSERVABILITY
     # -------------------------------
     log_node_execution(
         node_name="searcher_node",
@@ -248,18 +286,17 @@ def searcher_node(state: ResearchState) -> ResearchState:
     )
 
     node_name = NodeNames.SEARCHER
-
     existing_log = state.node_logs.get(node_name, {})
 
     existing_log.update({
         "total_steps": len(state.research_plan),
-        "results_per_step": {
-            step_id: len(results)
-            for step_id, results in state.search_results.items()
-        },
+        "results_per_step": {k: len(v) for k, v in state.search_results.items()},
         "step_status": step_status,
-        "total_citations": len(state.citations),
+        "successful_steps": sum(1 for s in step_status.values() if s == "success"),
+        "failed_steps": sum(1 for s in step_status.values() if s == "failed"),
+        "total_sources": len(state.citations),
         "search_failures": state.failure_counts["search_failures"],
+        "parsing_failures": state.failure_counts["parsing_failures"],
         "errors_count": len(state.errors)
     })
 
