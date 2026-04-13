@@ -22,7 +22,7 @@ def test_citation_basic_flow():
 
     result = citation_manager_node(state)
 
-    assert result.node_logs["citation"]["num_citations"] == 1
+    assert result.node_logs["CITATION_MANAGER"]["total_sources"] == 1
 
 
 def test_citation_invalid_url():
@@ -82,8 +82,9 @@ def test_citation_synthesis_alignment():
 
     result = citation_manager_node(state)
 
-    # should fallback to valid citation
-    assert "[1]" in result.synthesis.claims[0].citation_ids
+    # invalid citation id is hallucinated, claim marked unverified
+    assert "[999]" in result.synthesis.claims[0].hallucinated_citations
+    assert result.synthesis.claims[0].verified is False
 
 
 def test_citation_no_synthesis():
@@ -92,7 +93,7 @@ def test_citation_no_synthesis():
 
     result = citation_manager_node(state)
 
-    assert result.node_logs["citation"]["num_citations"] == 0
+    assert result.node_logs["CITATION_MANAGER"]["total_sources"] == 0
 
 
 def test_citation_error_handling():

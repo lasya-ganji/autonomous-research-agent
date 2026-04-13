@@ -62,10 +62,10 @@ def test_planner_invalid_step():
     assert any("Invalid plan step" in e.message for e in result.errors)
 
 
-# ✅ 5. Missing query
+# ✅ 5. Missing query → graceful error logged
 def test_planner_missing_query():
 
     state = ResearchState(query="")
 
-    with pytest.raises(Exception):
-        planner_node(state)
+    result = planner_node(state)
+    assert len(result.errors) > 0

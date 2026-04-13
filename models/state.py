@@ -21,14 +21,14 @@ class ResearchState(BaseModel):
 
     # SEARCH
     search_results: Dict[int, List[SearchResult]] = Field(default_factory=dict)
-    failed_queries: List[str] = Field(default_factory=list)
+    
 
     # DEDUP
-    deduplicated_urls: Set[str] = Field(default_factory=set)
+    #deduplicated_urls: Set[str] = Field(default_factory=set)
 
     # CONTEXT
-    context_docs: List[str] = Field(default_factory=list)
-    doc_summaries: Dict[str, str] = Field(default_factory=dict)
+    #context_docs: List[str] = Field(default_factory=list)
+    
 
     # EVALUATION
     evaluation: Optional[EvaluationResult] = None
@@ -40,7 +40,6 @@ class ResearchState(BaseModel):
     replan_count: int = Field(default=0, ge=0)
 
     # EXECUTION
-    unresolved_steps: List[int] = Field(default_factory=list)
     node_execution_count: int = Field(default=0, ge=0)
 
     # OUTPUT
@@ -53,7 +52,7 @@ class ResearchState(BaseModel):
     citation_mapping: Dict[str, str] = Field(default_factory=dict)
     citation_chunks: Dict[str, List[str]] = Field(default_factory=dict)
 
-    # NEW (IMPORTANT)
+    # NEW
     failure_counts: Dict[str, int] = Field(default_factory=lambda: {
         "search_failures": 0,
         "parsing_failures": 0,
@@ -62,11 +61,6 @@ class ResearchState(BaseModel):
     })
 
     is_partial: bool = False
-
-    # BUDGET
-    budget_remaining: int = Field(default=0, ge=0)
-    cache_hit: bool = False
-    caches: List[CacheModel] = Field(default_factory=list)
 
     # ERRORS
     errors: List[ErrorLog] = Field(default_factory=list)

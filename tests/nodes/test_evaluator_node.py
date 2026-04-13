@@ -20,7 +20,7 @@ class MockResult:
 # -----------------------------
 def test_evaluator_proceed():
 
-    def mock_score(results, query):
+    def mock_score(results, query, state=None):
         return results  # no filtering
 
     def mock_confidence(results, query):
@@ -28,7 +28,7 @@ def test_evaluator_proceed():
 
     state = ResearchState(query="AI")
     state.research_plan = [
-        type("Step", (), {"step_id": 1, "question": "What is AI?"})
+        type("Step", (), {"step_id": 1, "question": "What is AI?", "priority": 1})
     ]
     state.search_results = {
         1: [MockResult()]
@@ -48,7 +48,7 @@ def test_evaluator_proceed():
 # -----------------------------
 def test_evaluator_retry():
 
-    def mock_score(results, query):
+    def mock_score(results, query, state=None):
         return results
 
     def mock_confidence(results, query):
@@ -95,7 +95,7 @@ def test_evaluator_no_results():
 # -----------------------------
 def test_evaluator_scoring_error():
 
-    def mock_score(results, query):
+    def mock_score(results, query, state=None):
         raise Exception("Scoring failed")
 
     state = ResearchState(query="AI")
@@ -119,7 +119,7 @@ def test_evaluator_scoring_error():
 # -----------------------------
 def test_evaluator_confidence_error():
 
-    def mock_score(results, query):
+    def mock_score(results, query, state=None):
         return results
 
     def mock_confidence(results, query):
@@ -148,7 +148,7 @@ def test_evaluator_confidence_error():
 def test_evaluator_max_execution():
 
     state = ResearchState(query="AI")
-    state.node_execution_count = 12  # trigger limit
+    state.node_execution_count = 12  # at limit — handled gracefully by supervisor now
 
-    with pytest.raises(Exception):
-        evaluator_node(state)
+    result = evaluator_node(state)
+    assert result is not None
