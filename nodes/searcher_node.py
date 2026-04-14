@@ -66,7 +66,7 @@ def _search_with_retry(query, state):
             continue
 
         # -------------------------------
-        # HANDLE STRUCTURED TOOL ERROR (CRITICAL FIRST)
+        # HANDLE STRUCTURED TOOL ERROR 
         # -------------------------------
         if isinstance(results, dict) and results.get("error"):
 
@@ -94,7 +94,7 @@ def _search_with_retry(query, state):
             continue
 
         # -------------------------------
-        # SUCCESS CASE (STRICT)
+        # SUCCESS CASE 
         # -------------------------------
         if isinstance(results, list) and results:
             return results
