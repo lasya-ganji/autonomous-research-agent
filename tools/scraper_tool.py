@@ -14,7 +14,6 @@ HEADERS = {
 }
 
 
-
 def clean_text(text: str) -> str:
     """
     Normalize and trim content for safe LLM usage
@@ -52,16 +51,30 @@ def scrape_url(url: str) -> dict:
     Returns:
     {
         "content": str,
-        "publish_date": str | None
+        "publish_date": str | None,
+        "error_type": str | None   
     }
     """
 
     try:
         response = requests.get(url, headers=HEADERS, timeout=8)
 
+        # -------------------------------
+        # HTTP ERROR CLASSIFICATION
+        # -------------------------------
         if response.status_code != 200:
             print(f"[SCRAPER WARNING] Non-200 response: {url} | status={response.status_code}")
-            return {"content": "", "publish_date": None}
+
+            if response.status_code == 401 or response.status_code == 403:
+                error_type = "auth_error"
+            elif response.status_code == 404:
+                error_type = "not_found"
+            elif 500 <= response.status_code < 600:
+                error_type = "server_error"
+            else:
+                error_type = "http_error"
+
+            return {"content": "", "publish_date": None, "error_type": error_type}
 
         html = response.text
 
@@ -91,9 +104,13 @@ def scrape_url(url: str) -> dict:
             print(f"[SCRAPER FALLBACK] Using BS4 for: {url}")
             content = fallback_bs4(html)
 
-        
+        # -------------------------------
+        # FINAL VALIDATION
+        # -------------------------------
         if not content or len(content.split()) < MIN_CONTENT_WORDS:
             print(f"[SCRAPER ERROR] No usable content: {url}")
+            return {"content": "", "publish_date": None, "error_type": "content_unusable"}  
+
         # -------------------------------
         # METADATA
         # -------------------------------
@@ -103,9 +120,21 @@ def scrape_url(url: str) -> dict:
 
         return {
             "content": content,
-            "publish_date": publish_date
+            "publish_date": publish_date,
+            "error_type": None  
         }
+
+    # -------------------------------
+    #  NETWORK / TIMEOUT HANDLING
+    # -------------------------------
+    except requests.exceptions.Timeout:
+        print(f"[SCRAPER ERROR] Timeout: {url}")
+        return {"content": "", "publish_date": None, "error_type": "timeout_error"}
+
+    except requests.exceptions.ConnectionError:
+        print(f"[SCRAPER ERROR] Connection failed: {url}")
+        return {"content": "", "publish_date": None, "error_type": "network_error"}
 
     except Exception as e:
         print(f"[SCRAPER ERROR] URL: {url} | ERROR: {e}")
-        return {"content": "", "publish_date": None}
+        return {"content": "", "publish_date": None, "error_type": "unknown_error"}
