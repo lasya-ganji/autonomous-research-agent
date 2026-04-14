@@ -10,6 +10,7 @@ from config.constants.node_constants.evaluator_constants import (
     MAX_REPLANS
 )
 
+from models import state
 from models.evaluation_models import EvaluationResult, StepEvaluation
 from models.enums import ErrorTypeEnum, SeverityEnum
 from models.error_models import ErrorLog
@@ -46,6 +47,10 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     }
 
     try:
+        
+        start_tokens = state.total_tokens
+        start_cost = state.total_cost
+        
         step_evaluations: List[StepEvaluation] = []
         failed_steps = 0
         total_confidence = 0.0
@@ -199,6 +204,9 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         # -------------------------------
         # LOGGING
         # -------------------------------
+        node_tokens = state.total_tokens - start_tokens
+        node_cost = state.total_cost - start_cost
+        
         node_name = NodeNames.EVALUATOR
         existing_log = state.node_logs.get(node_name, {})
 
@@ -213,6 +221,9 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             "all_failed": all_failed,
             "failure_counts": dict(state.failure_counts),
             "errors_count": len(state.errors),
+            "node_tokens": node_tokens,
+            "node_cost": round(node_cost, 4),
+            "total_cost": round(state.total_cost, 4)
         })
 
         state.node_logs[node_name] = existing_log
