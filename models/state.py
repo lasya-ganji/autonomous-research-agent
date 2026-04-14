@@ -52,7 +52,6 @@ class ResearchState(BaseModel):
     citation_mapping: Dict[str, str] = Field(default_factory=dict)
     citation_chunks: Dict[str, List[str]] = Field(default_factory=dict)
 
-    # NEW
     failure_counts: Dict[str, int] = Field(default_factory=lambda: {
         "search_failures": 0,
         "parsing_failures": 0,
@@ -75,3 +74,7 @@ class ResearchState(BaseModel):
 
     # ROUTING
     next_node: Optional[str] = None
+    
+    # TIME TRACKING
+    start_time: Optional[float] = None
+    elapsed_time: float = 0.0

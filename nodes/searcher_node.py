@@ -34,53 +34,113 @@ from config.constants.node_constants.search_constants import (
 
 
 # -------------------------------
-# SEARCH WITH RETRY
+# SEARCH WITH RETRY 
 # -------------------------------
 def _search_with_retry(query, state):
+    """
+    Performs search with limited retry.
+    Handles structured tool errors and fail-fast for non-retryable failures.
+    """
+
     for attempt in range(MAX_SEARCH_RETRIES):
+
+        # -------------------------------
+        # CALL SEARCH TOOL
+        # -------------------------------
         try:
             results = search_tool(query)
-
-            if results:
-                return results
-
         except Exception as e:
+            # Exception should be treated as retryable system error
             state.errors.append(
                 ErrorLog(
                     node="searcher_node",
                     timestamp=datetime.now().isoformat(),
                     severity=SeverityEnum.WARNING,
-                    error_type=ErrorTypeEnum.search_failure,
+                    error_type=ErrorTypeEnum.system_error,
                     message=f"Search attempt {attempt+1} failed for query='{query}': {str(e)}"
                 )
             )
 
+            # retry with backoff
+            time.sleep(BACKOFF_BASE * (2 ** attempt))
+            continue
+
+        # -------------------------------
+        # HANDLE STRUCTURED TOOL ERROR (CRITICAL FIRST)
+        # -------------------------------
+        if isinstance(results, dict) and results.get("error"):
+
+            error_type = results.get("type", "unknown_error")
+            severity = results.get("severity", "WARNING")
+            retryable = results.get("retryable", True)
+            message = results.get("error")
+
+            state.errors.append(
+                ErrorLog(
+                    node="searcher_node",
+                    timestamp=datetime.now().isoformat(),
+                    severity=SeverityEnum[severity],
+                    error_type=ErrorTypeEnum[error_type],
+                    message=f"Search tool error: {message}"
+                )
+            )
+
+            if not retryable:
+                state.api_failure = True
+                return []
+
+            # retryable → retry with backoff
+            time.sleep(BACKOFF_BASE * (2 ** attempt))
+            continue
+
+        # -------------------------------
+        # SUCCESS CASE (STRICT)
+        # -------------------------------
+        if isinstance(results, list) and results:
+            return results
+
+        # -------------------------------
+        # EMPTY RESULT (NORMAL FAILURE)
+        # -------------------------------
+        state.errors.append(
+            ErrorLog(
+                node="searcher_node",
+                timestamp=datetime.now().isoformat(),
+                severity=SeverityEnum.WARNING,
+                error_type=ErrorTypeEnum.search_failure,
+                message=f"No results for query: {query} (attempt {attempt+1})"
+            )
+        )
+
+        # retry only if attempts left
         time.sleep(BACKOFF_BASE * (2 ** attempt))
 
+    # -------------------------------
+    # FINAL FAILURE
+    # -------------------------------
     state.failure_counts["search_failures"] += 1
     return []
 
-
+# -------------------------------
+# MAIN SEARCHER NODE
+# -------------------------------
 @trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
 
     # -------------------------------
-    # SAFETY INIT
+    # STATE INITIALIZATION
     # -------------------------------
     if state.errors is None:
         state.errors = []
     if state.node_logs is None:
         state.node_logs = {}
 
-    # ⚠️ Keeping as-is (no logic change)
     state.failure_counts["parsing_failures"] = 0
     state.failure_counts["search_failures"] = 0
-
     state.search_results = {}
 
     seen_urls = set()
     citation_counter = len(state.citations)
-
     step_status = {}
 
     try:
@@ -99,23 +159,48 @@ def searcher_node(state: ResearchState) -> ResearchState:
         steps = sorted(state.research_plan, key=lambda x: x.priority)
 
         for step in steps:
+
+            # -------------------------------
+            # HARD STOP ON API FAILURE
+            # -------------------------------
+            if getattr(state, "api_failure", False):
+                break
+
             step_id = step.step_id
             query = step.question
 
             print(f"[SEARCH] Step {step_id} Query: {query}")
 
             # -------------------------------
-            # SEARCH
+            # PRIMARY SEARCH
             # -------------------------------
             raw_results = _search_with_retry(query, state)
 
-            if not raw_results:
+            if getattr(state, "api_failure", False):
+                step_status[step_id] = "failed"
+                state.search_results[step_id] = []
+                return state
+
+            # -------------------------------
+            # FALLBACK SEARCH
+            # -------------------------------
+            if not raw_results and not getattr(state, "api_failure", False):
+
                 fallback_query = " ".join(query.split()[:6])
                 print(f"[SEARCH RETRY] Using fallback query: {fallback_query}")
+
                 raw_results = _search_with_retry(fallback_query, state)
+
+                if getattr(state, "api_failure", False):
+                    step_status[step_id] = "failed"
+                    state.search_results[step_id] = []
+                    return state
 
             print(f"[SEARCH] Results fetched: {len(raw_results)}")
 
+            # -------------------------------
+            # FAILURE CASE
+            # -------------------------------
             if not raw_results:
                 step_status[step_id] = "failed"
 
@@ -136,7 +221,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             step_status[step_id] = "success"
 
             # -------------------------------
-            # DEDUP
+            # DEDUPLICATION
             # -------------------------------
             deduped_results = deduplicate_pipeline(raw_results)
 
@@ -164,8 +249,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             unique_results = unique_results[:MAX_RESULTS_PER_STEP]
 
-            print(f"[DEDUP] Step {step_id}: {len(unique_results)} results")
-
             structured_results = []
 
             for i, (r, norm_url) in enumerate(unique_results):
@@ -176,9 +259,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 citation_counter += 1
                 citation_id = f"[{citation_counter}]"
 
-                # -------------------------------
-                # URL VALIDATION
-                # -------------------------------
+                # URL validation
                 try:
                     status = validate_url(norm_url)
                 except Exception as e:
@@ -195,9 +276,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         )
                     )
 
-                # -------------------------------
-                # SCRAPING
-                # -------------------------------
+                # Scraping
                 content = None
                 publish_date = None
 
@@ -209,8 +288,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                         if not content or len(content.split()) < MIN_CONTENT_WORDS:
                             state.failure_counts["parsing_failures"] += 1
-
-                            print(f"[SEARCH PARSE FAIL] {norm_url}")
 
                             state.errors.append(
                                 ErrorLog(
@@ -262,7 +339,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 )
 
             state.search_results[step_id] = structured_results
-            print(f"[SEARCH] Step {step_id} status: {step_status[step_id]}")
 
     except Exception as e:
         state.failure_counts["search_failures"] += 1
@@ -286,8 +362,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
         output_data={k: len(v) for k, v in state.search_results.items()}
     )
 
-    node_name = NodeNames.SEARCHER
-    existing_log = state.node_logs.get(node_name, {})
+    existing_log = state.node_logs.get(NodeNames.SEARCHER, {})
 
     existing_log.update({
         "total_steps": len(state.research_plan),
@@ -301,7 +376,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
         "errors_count": len(state.errors)
     })
 
-    state.node_logs[node_name] = existing_log
+    state.node_logs[NodeNames.SEARCHER] = existing_log
 
     state.node_execution_count += 1
     return state

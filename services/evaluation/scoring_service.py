@@ -31,7 +31,6 @@ from config.constants.scoring_constants import (
     RELEVANCE_DUAL_BOOST, RELEVANCE_TITLE_BOOST, RELEVANCE_KEYWORD_PENALTY,
     WEIGHT_MAX_CAP,
     DOC_EMBED_CHAR_LIMIT,
-    RECENCY_NEUTRAL_SCORE,
     RECENCY_MAX_YEAR_DIFF,
     RECENCY_DAYS_PER_YEAR,
     RECENCY_MAX_DAYS_OLD,
@@ -119,7 +118,7 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
     )
 
     if semantic_score > SEMANTIC_BOOST_THRESHOLD and keyword_score > KEYWORD_BOOST_THRESHOLD:
-    base += RELEVANCE_DUAL_BOOST
+        base += RELEVANCE_DUAL_BOOST
 
     if semantic_score > SEMANTIC_BOOST_THRESHOLD and title_score > TITLE_BOOST_THRESHOLD:
         base += RELEVANCE_TITLE_BOOST

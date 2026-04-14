@@ -61,5 +61,29 @@ If JSON is requested:
                 "total_tokens": usage.total_tokens if usage else 0
             }
         }
+
     except Exception as e:
-        return {"content": "", "usage": {}, "error": str(e)}
+        error_msg = str(e).lower()
+
+        # -------------------------------
+        # ERROR CLASSIFICATION
+        # -------------------------------
+        if any(x in error_msg for x in ["unauthorized", "invalid api key", "401"]):
+            error_type = "api_error"
+
+        elif any(x in error_msg for x in ["timeout", "timed out"]):
+            error_type = "timeout_error"
+
+        elif any(x in error_msg for x in ["connection", "network", "dns"]):
+            error_type = "network_error"
+
+        else:
+            error_type = "unknown_error"
+
+        return {
+            "content": "",
+            "usage": {},
+            "error": str(e),
+            "error_type": error_type,
+            "error_source": "llm_call"
+        }

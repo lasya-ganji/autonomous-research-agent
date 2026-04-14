@@ -2,7 +2,7 @@ from typing import Dict
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from services.system.cost_tracker import calculate_cost 
-from config.constants.scoring_constants import DEFAULT_WEIGHTS 
+from config.constants.scoring_constants import DEFAULT_WEIGHTS , MIN_THRESHOLDS, WEIGHT_MAX_CAP
 import json
 
 
@@ -45,7 +45,7 @@ def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
     prompt = prompt_template.replace("{query}", query)
 
     try:
-        # ✅ CALL LLM
+        # CALL LLM
         res = call_llm(prompt)
 
         response = res.get("content", "")
@@ -63,7 +63,7 @@ def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
             cost = calculate_cost(prompt_tokens, completion_tokens)
             state.total_cost += cost
 
-            # 🚨 COST GUARDRAIL
+            # COST GUARDRAIL
             if state.total_cost > state.cost_limit:
                 state.abort = True
                 return DEFAULT_WEIGHTS

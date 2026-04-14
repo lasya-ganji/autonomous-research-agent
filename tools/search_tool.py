@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 from tavily import TavilyClient
 from models.search_models import SearchResult
 import uuid
@@ -11,7 +11,7 @@ load_dotenv()
 client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
 
 
-def search_tool(query: str) -> List[SearchResult]:
+def search_tool(query: str) -> Union[List[SearchResult], dict]:
     print(f"[SEARCH TOOL] Query: {query}")
 
     try:
@@ -39,5 +39,39 @@ def search_tool(query: str) -> List[SearchResult]:
         return results
 
     except Exception as e:
-        print(f"[SEARCH TOOL ERROR] {e}")
-        return []
+        error_msg = str(e).lower()
+
+        # -------------------------------
+        # ERROR CLASSIFICATION
+        # -------------------------------
+        if any(x in error_msg for x in ["unauthorized", "invalid api key", "401"]):
+            error_type = "api_error"
+            severity = "CRITICAL"
+            retryable = False
+
+        elif any(x in error_msg for x in ["timeout", "timed out"]):
+            error_type = "timeout_error"
+            severity = "WARNING"
+            retryable = True
+
+        elif any(x in error_msg for x in ["connection", "network", "dns"]):
+            error_type = "network_error"
+            severity = "WARNING"
+            retryable = True
+
+        else:
+            error_type = "unknown_error"
+            severity = "WARNING"
+            retryable = True
+
+        print(f"[SEARCH TOOL ERROR] {e} | TYPE: {error_type}")
+
+        # -------------------------------
+        # RETURN STRUCTURED ERROR
+        # -------------------------------
+        return {
+            "error": str(e),
+            "type": error_type,
+            "severity": severity,
+            "retryable": retryable
+        }

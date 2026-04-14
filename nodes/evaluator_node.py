@@ -33,12 +33,10 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         state.errors = []
     if state.node_logs is None:
         state.node_logs = {}
-    if not hasattr(state, "failure_counts") or state.failure_counts is None:
-        state.failure_counts = {
-            "search_failures": 0,
-            "parsing_failures": 0,
-            "low_confidence": 0,
-        }
+
+    # IMPORTANT: reset only per-run counters
+    state.failure_counts["search_failures"] = 0
+    state.failure_counts["low_confidence"] = 0
 
     input_data: Dict = {
         "num_steps": len(state.research_plan),
@@ -125,6 +123,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                         )
 
             total_confidence += confidence
+
             if not passed:
                 failed_steps += 1
 
@@ -148,6 +147,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         no_improvement = improvement <= 0
 
         low_confidence = avg_confidence < CONFIDENCE_THRESHOLD
+
         all_failed = failed_steps == total_steps and total_steps > 0
 
         # -------------------------------
@@ -162,14 +162,11 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             state.failure_reason = ""
 
         else:
-            if state.search_retry_count < MAX_SEARCH_RETRIES:
+            if state.search_retry_count < MAX_SEARCH_RETRIES and not no_improvement:
                 decision = "retry"
                 state.search_retry_count += 1
-
                 state.failure_reason = (
-                    "all steps failed" if all_failed
-                    else "low confidence" if low_confidence
-                    else "partial failure"
+                    "all steps failed" if all_failed else "low confidence"
                 )
 
             elif state.replan_count < MAX_REPLANS:
@@ -190,6 +187,9 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         )
         state.overall_confidence = avg_confidence
 
+        # -------------------------------
+        # UPDATE CITATION SCORES
+        # -------------------------------
         for results in state.search_results.values():
             for r in results:
                 cid = getattr(r, "citation_id", None)
@@ -197,7 +197,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                     state.citations[cid].quality_score = round(r.quality_score, 3)
 
         # -------------------------------
-        # DEBUG (UI CLEAN)
+        # LOGGING
         # -------------------------------
         node_name = NodeNames.EVALUATOR
         existing_log = state.node_logs.get(node_name, {})
@@ -240,25 +240,20 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             )
         )
 
-        state.evaluation = EvaluationResult(steps=[], decision="proceed")
+        # safe fallback
+        state.evaluation = EvaluationResult(steps=[], decision="forced_proceed")
         state.overall_confidence = state.overall_confidence or 0.0
 
-        node_name = NodeNames.EVALUATOR
-        existing_log = state.node_logs.get(node_name, {})
-
-        existing_log.update({
-            "decision": "proceed",
-            "avg_confidence": state.overall_confidence,
+        state.node_logs[NodeNames.EVALUATOR] = {
+            "decision": "forced_proceed",
             "error": str(e),
             "errors_count": len(state.errors),
-        })
-
-        state.node_logs[node_name] = existing_log
+        }
 
         log_node_execution(
             "evaluator_node",
             input_data,
-            {"decision": "proceed"}
+            {"decision": "forced_proceed"}
         )
 
         state.node_execution_count += 1

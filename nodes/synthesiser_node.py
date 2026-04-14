@@ -71,6 +71,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
+            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -132,6 +133,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
+            state.node_execution_count += 1
             return state
 
         context_docs = list(dict.fromkeys(context_docs))
@@ -150,10 +152,65 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         res = call_llm(prompt=prompt, temperature=SYNTHESISER_TEMPERATURE)
 
-        response_content = res.get("content", "")
+        # -------------------------------
+        # HANDLE LLM ERRORS
+        # -------------------------------
+        if isinstance(res, dict) and res.get("error"):
+            raw_type = res.get("error_type", "unknown_error")
+
+            if raw_type == "api_error":
+                error_type = ErrorTypeEnum.api_error
+                severity = SeverityEnum.CRITICAL
+            elif raw_type == "timeout_error":
+                error_type = ErrorTypeEnum.timeout_error
+                severity = SeverityEnum.ERROR
+            elif raw_type == "network_error":
+                error_type = ErrorTypeEnum.network_error
+                severity = SeverityEnum.ERROR
+            else:
+                error_type = ErrorTypeEnum.system_error
+                severity = SeverityEnum.ERROR
+
+            state.errors.append(
+                ErrorLog(
+                    node="synthesiser_node",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    severity=severity,
+                    error_type=error_type,
+                    message=f"LLM failure: {res.get('error')}",
+                )
+            )
+
+            state.is_partial = True
+            state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
+            state.node_execution_count += 1
+            return state
+
+        response_content = res.get("content", "") or ""
         usage = res.get("usage", {}) or {}
 
-        # Node cost (consistent with other nodes)
+        # -------------------------------
+        # EMPTY RESPONSE GUARD
+        # -------------------------------
+        if not response_content.strip():
+            state.errors.append(
+                ErrorLog(
+                    node="synthesiser_node",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    severity=SeverityEnum.WARNING,
+                    error_type=ErrorTypeEnum.parsing_error,
+                    message="Empty response from LLM",
+                )
+            )
+
+            state.is_partial = True
+            state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
+            state.node_execution_count += 1
+            return state
+
+        # -------------------------------
+        # COST TRACKING
+        # -------------------------------
         node_tokens = usage.get("total_tokens", 0)
         node_cost = calculate_cost(
             usage.get("prompt_tokens", 0),
@@ -174,25 +231,34 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     message=f"Cost exceeded: ₹{state.total_cost}",
                 )
             )
+            state.node_execution_count += 1
             return state
 
         # -------------------------------
-        # PARSE RESPONSE
+        # PARSE RESPONSE (ROBUST)
         # -------------------------------
         try:
-            parsed = json.loads(response_content) if isinstance(response_content, str) else response_content
-        except Exception as e:
-            state.errors.append(
-                ErrorLog(
-                    node="synthesiser_node",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    severity=SeverityEnum.ERROR,
-                    error_type=ErrorTypeEnum.parsing_error,
-                    message=f"LLM JSON parse failed: {str(e)}",
+            parsed = json.loads(response_content)
+        except Exception:
+            try:
+                start = response_content.find("{")
+                end = response_content.rfind("}") + 1
+                parsed = json.loads(response_content[start:end])
+            except Exception as e:
+                state.errors.append(
+                    ErrorLog(
+                        node="synthesiser_node",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        severity=SeverityEnum.ERROR,
+                        error_type=ErrorTypeEnum.parsing_error,
+                        message=f"LLM JSON parse failed: {str(e)}",
+                    )
                 )
-            )
-            parsed = {}
+                parsed = {}
 
+        # -------------------------------
+        # CLAIM PROCESSING
+        # -------------------------------
         valid_ids_set = {
             cid for cid, c in state.citations.items()
             if c.status == CitationStatus.valid
@@ -215,6 +281,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     cid = str(cid).strip()
                     if not cid.startswith("["):
                         cid = f"[{cid}]"
+
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
@@ -225,6 +292,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                 used_ids.update(filtered_ids)
 
                 confidence = float(c.get("confidence", 0.5))
+                confidence = max(0.0, min(confidence, 1.0))
 
                 claims.append(
                     Claim(
@@ -250,12 +318,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         conflicts = parsed.get("conflicts", [])
 
-        # -------------------------------
-        # PARTIAL LOGIC (PRD ALIGNED)
-        # -------------------------------
         evaluator_failed = state.node_logs.get("evaluator_node", {}).get("all_failed", False)
 
         partial_flag = (
+            state.is_partial or
             len(claims) == 0 or
             len(used_ids) < MIN_CITATIONS_REQUIRED or
             evaluator_failed
@@ -272,11 +338,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         )
 
         # -------------------------------
-        # OBSERVABILITY
+        # LOGGING
         # -------------------------------
-        node_name = NodeNames.SYNTHESIS
-        existing_log = state.node_logs.get(node_name, {})
-
+        existing_log = state.node_logs.get(NodeNames.SYNTHESIS, {})
         existing_log.update({
             "num_claims": len(claims),
             "valid_citations_used": len(used_ids),
@@ -289,8 +353,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             "node_cost": round(node_cost, 4),
             "total_cost": round(state.total_cost, 4)
         })
-
-        state.node_logs[node_name] = existing_log
+        state.node_logs[NodeNames.SYNTHESIS] = existing_log
 
         log_node_execution(
             "synthesiser_node",
