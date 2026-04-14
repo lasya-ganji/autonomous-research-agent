@@ -11,11 +11,12 @@ from models.error_models import ErrorLog
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from utils.logger import log_node_execution
-from config.constants.node_names import NodeNames
+from config.constants.node_constants.node_names import NodeNames
 
 from services.system.cost_tracker import calculate_cost
 
-from config.constants.reporter_constants import MIN_REQUIRED_CITATIONS
+from config.constants.node_constants.reporter_constants import MIN_REQUIRED_CITATIONS
+from config.constants.llm_constants import REPORTER_TEMPERATURE
 
 
 @trace_node(NodeNames.REPORTER)
@@ -139,7 +140,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             .replace("{citations}", citations_text)
         )
 
-        res = call_llm(prompt=prompt, temperature=0.1)
+        res = call_llm(prompt=prompt, temperature=REPORTER_TEMPERATURE)
 
         response = res.get("content", "")
         usage = res.get("usage", {}) or {}

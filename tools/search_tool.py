@@ -4,6 +4,7 @@ from models.search_models import SearchResult
 import uuid
 import os
 from dotenv import load_dotenv
+from config.constants.node_constants.search_constants import TAVILY_MAX_RESULTS
 
 load_dotenv()
 
@@ -14,7 +15,7 @@ def search_tool(query: str) -> List[SearchResult]:
     print(f"[SEARCH TOOL] Query: {query}")
 
     try:
-        response = client.search(query=query, max_results=5)
+        response = client.search(query=query, max_results=TAVILY_MAX_RESULTS)
 
         results: List[SearchResult] = []
 
@@ -39,4 +40,4 @@ def search_tool(query: str) -> List[SearchResult]:
 
     except Exception as e:
         print(f"[SEARCH TOOL ERROR] {e}")
-        return [] 
+        return []

@@ -8,7 +8,6 @@ from models.citation_models import Citation
 from models.synthesis_models import SynthesisModel
 from models.report_models import ReportModel
 from models.error_models import ErrorLog
-from models.cache_models import CacheModel
 
 
 class ResearchState(BaseModel):
@@ -40,6 +39,7 @@ class ResearchState(BaseModel):
     replan_count: int = Field(default=0, ge=0)
 
     # EXECUTION
+    unresolved_steps: List[int] = Field(default_factory=list)
     node_execution_count: int = Field(default=0, ge=0)
 
     # OUTPUT

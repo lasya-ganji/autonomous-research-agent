@@ -2,8 +2,8 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List
 
-from config.constants.node_names import NodeNames
-from config.constants.evaluator_constants import (
+from config.constants.node_constants.node_names import NodeNames
+from config.constants.node_constants.evaluator_constants import (
     CONFIDENCE_THRESHOLD,
     LOW_CONFIDENCE_THRESHOLD,
     MAX_SEARCH_RETRIES,

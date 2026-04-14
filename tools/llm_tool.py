@@ -2,17 +2,17 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from langsmith import traceable
-from langsmith.run_helpers import get_current_run_tree 
+from langsmith.run_helpers import get_current_run_tree
 
-# Load environment variables
+from config.constants.llm_constants import LLM_MODEL, DEFAULT_TEMPERATURE
+
 load_dotenv()
 
-# Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-@traceable(name="llm_call")  # LangSmith tracing
-def call_llm(prompt: str, temperature: float = 0.2):
+@traceable(name="llm_call")
+def call_llm(prompt: str, temperature: float = DEFAULT_TEMPERATURE):
     try:
         messages = [
             {
@@ -35,14 +35,12 @@ If JSON is requested:
         ]
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=LLM_MODEL,
             messages=messages,
             temperature=temperature
         )
 
         content = response.choices[0].message.content
-
-        # Extract usage
         usage = response.usage
 
         run = get_current_run_tree()

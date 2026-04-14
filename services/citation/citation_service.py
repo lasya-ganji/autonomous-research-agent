@@ -3,14 +3,12 @@ import requests
 
 from models.citation_models import Citation
 from models.enums import CitationStatus
+from config.constants.node_constants.citation_constants import CITATION_VALIDATE_TIMEOUT
 
-
-# Simple in-memory cache
 _url_cache = {}
 
 
 def validate_url(url: str) -> CitationStatus:
-
     if not url:
         return CitationStatus.broken
 
@@ -20,7 +18,7 @@ def validate_url(url: str) -> CitationStatus:
     try:
         resp = requests.get(
             url,
-            timeout=8,
+            timeout=CITATION_VALIDATE_TIMEOUT,
             allow_redirects=True,
             headers={"User-Agent": "Mozilla/5.0"}
         )
@@ -40,15 +38,13 @@ def validate_url(url: str) -> CitationStatus:
         status = CitationStatus.stale
 
     except requests.RequestException:
-        status = CitationStatus.broken   
+        status = CitationStatus.broken
 
     _url_cache[url] = status
     return status
 
 
-# BUILD CITATION
 def build_citation(result, citation_id: str) -> Citation:
-
     url = str(getattr(result, "url", ""))
 
     return Citation(

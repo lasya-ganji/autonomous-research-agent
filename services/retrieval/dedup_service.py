@@ -4,14 +4,13 @@ import math
 from urllib.parse import urlparse
 from typing import List
 from collections import defaultdict
-
-
-# CONFIG 
-SEMANTIC_DUP_THRESHOLD = 0.80
-TITLE_SIM_THRESHOLD = 0.85
-TOP_K_SEMANTIC = 10
-QUALITY_DIFF_THRESHOLD = 0.1  
-MIN_QUALITY_FOR_DEDUP = 0.6
+from config.constants.retrieval_constants import (
+    SEMANTIC_DUP_THRESHOLD,
+    TITLE_SIM_THRESHOLD,
+    TOP_K_SEMANTIC,
+    QUALITY_DIFF_THRESHOLD,
+    MIN_QUALITY_FOR_DEDUP
+)
 
 
 # EMBEDDING CACHE 

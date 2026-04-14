@@ -21,10 +21,10 @@ from services.citation.citation_service import validate_url
 
 from utils.logger import log_node_execution
 from observability.tracing import trace_node
-from config.constants.node_names import NodeNames
+from config.constants.node_constants.node_names import NodeNames
 
 from config.constants.scraper_constants import MIN_CONTENT_WORDS
-from config.constants.search_constants import (
+from config.constants.node_constants.search_constants import (
     MAX_SEARCH_RETRIES,
     BACKOFF_BASE,
     MAX_RESULTS_PER_STEP,
@@ -130,6 +130,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 )
 
                 state.search_results[step_id] = []
+                state.unresolved_steps.append(step_id) 
                 continue
 
             step_status[step_id] = "success"

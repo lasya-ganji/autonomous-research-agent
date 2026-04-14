@@ -1,8 +1,9 @@
 from typing import List, Optional
 from sentence_transformers import SentenceTransformer
+from config.constants.llm_constants import EMBEDDING_MODEL, EMBEDDING_PROMPT_PREFIX
 
 # Load model once
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer(EMBEDDING_MODEL)
 
 
 def get_embedding(text: str) -> Optional[List[float]]:
@@ -11,7 +12,7 @@ def get_embedding(text: str) -> Optional[List[float]]:
         return None
 
     try:
-        formatted_text = f"Represent this sentence for retrieval: {text}"
+        formatted_text = f"{EMBEDDING_PROMPT_PREFIX}{text}"
 
         embedding = model.encode(formatted_text)
 

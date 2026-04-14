@@ -1,18 +1,12 @@
 from typing import Dict
 from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
-from services.system.cost_tracker import calculate_cost   # ✅ ADD THIS
+from services.system.cost_tracker import calculate_cost 
+from config.constants.scoring_constants import DEFAULT_WEIGHTS 
 import json
 
 
-DEFAULT_WEIGHTS = {
-    "relevance": 0.5,
-    "recency": 0.2,
-    "domain": 0.2,
-    "depth": 0.1
-}
-
-REQUIRED_KEYS = {"relevance", "recency", "domain", "depth"}
+REQUIRED_KEYS = set(DEFAULT_WEIGHTS.keys())
 
 
 # ---------------- VALIDATION HELPERS ---------------- #
@@ -23,12 +17,10 @@ def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
 
 
 def _apply_constraints(weights: Dict[str, float]) -> Dict[str, float]:
-    weights["relevance"] = max(weights["relevance"], 0.35)
-    weights["recency"] = max(weights["recency"], 0.15)
-    weights["domain"] = max(weights["domain"], 0.15)
-    weights["depth"] = max(weights["depth"], 0.05)
+    for k in weights:
+        weights[k] = max(MIN_THRESHOLDS.get(k, 0), weights[k])
 
-    weights = {k: min(v, 0.6) for k, v in weights.items()}
+    weights = {k: min(v, WEIGHT_MAX_CAP) for k, v in weights.items()}
 
     return _normalize(weights)
 

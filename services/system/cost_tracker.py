@@ -1,12 +1,15 @@
+from config.constants.cost_constants import (
+    GPT4O_MINI_INPUT_PRICE,
+    GPT4O_MINI_OUTPUT_PRICE,
+    USD_TO_INR
+)
+
+
 def calculate_cost(prompt_tokens, completion_tokens):
-    # Pricing for gpt-4o-mini (approx)
-    input_cost = (prompt_tokens / 1000) * 0.00015
-    output_cost = (completion_tokens / 1000) * 0.0006
+    input_cost = (prompt_tokens / 1000) * GPT4O_MINI_INPUT_PRICE
+    output_cost = (completion_tokens / 1000) * GPT4O_MINI_OUTPUT_PRICE
 
     total_usd = input_cost + output_cost
-
-    # Convert USD → INR
-    usd_to_inr = 83
-    total_inr = total_usd * usd_to_inr
+    total_inr = total_usd * USD_TO_INR
 
     return round(total_inr, 4)

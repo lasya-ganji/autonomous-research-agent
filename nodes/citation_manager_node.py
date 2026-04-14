@@ -11,9 +11,9 @@ from services.retrieval.dedup_service import cosine_similarity
 
 from observability.tracing import trace_node
 from utils.logger import log_node_execution
-from config.constants.node_names import NodeNames
+from config.constants.node_constants.node_names import NodeNames
 
-from config.constants.citation_constants import (
+from config.constants.node_constants.citation_constants import (
     SIMILARITY_THRESHOLD,
     VERIFICATION_THRESHOLD,
     MIN_REQUIRED_CITATIONS

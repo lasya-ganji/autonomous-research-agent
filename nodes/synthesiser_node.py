@@ -12,11 +12,11 @@ from utils.prompt_loader import load_prompt
 from observability.tracing import trace_node
 from utils.chunking import chunk_text
 from utils.logger import log_node_execution
-from config.constants.node_names import NodeNames
+from config.constants.node_constants.node_names import NodeNames
 
 from services.system.cost_tracker import calculate_cost
 
-from config.constants.synthesis_constants import (
+from config.constants.node_constants.synthesis_constants import (
     MAX_SYNTHESIS_RESULTS,
     MAX_CHUNKS_PER_DOC,
     MAX_CONTEXT_DOCS,
@@ -25,6 +25,7 @@ from config.constants.synthesis_constants import (
     MIN_CONTENT_LENGTH,
     MIN_CITATIONS_REQUIRED
 )
+from config.constants.llm_constants import SYNTHESISER_TEMPERATURE
 
 
 def text_overlap(a: str, b: str) -> float:
@@ -147,7 +148,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             .replace("{context_docs}", context_str)
         )
 
-        res = call_llm(prompt=prompt, temperature=0)
+        res = call_llm(prompt=prompt, temperature=SYNTHESISER_TEMPERATURE)
 
         response_content = res.get("content", "")
         usage = res.get("usage", {}) or {}

@@ -7,9 +7,9 @@ from models.enums import SeverityEnum, ErrorTypeEnum
 
 from observability.tracing import trace_node
 from utils.logger import log_node_execution
-from config.constants.node_names import NodeNames
+from config.constants.node_constants.node_names import NodeNames
 
-from config.constants.supervisor_constants import (
+from config.constants.node_constants.supervisor_constants import (
     MAX_NODE_EXECUTIONS,
     MAX_SEARCH_FAILURES
 )

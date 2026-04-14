@@ -4,12 +4,13 @@ from typing import List
 
 from observability.tracing import trace_node
 
-from config.constants.node_names import NodeNames
-from config.constants.planner_constants import (
+from config.constants.node_constants.node_names import NodeNames
+from config.constants.node_constants.planner_constants import (
     MAX_PLAN_STEPS,
     MIN_QUESTION_LENGTH,
     MAX_PRIORITY
 )
+from config.constants.llm_constants import PLANNER_TEMPERATURE
 
 from models.error_models import ErrorLog
 from models.enums import ErrorTypeEnum, SeverityEnum
@@ -143,7 +144,7 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
         # -------------------------------
         # LLM CALL
         # -------------------------------
-        res = llm_fn(prompt=prompt, temperature=0)
+        res = llm_fn(prompt=prompt, temperature=PLANNER_TEMPERATURE)
 
         if isinstance(res, dict):
             response = res.get("content", "")
