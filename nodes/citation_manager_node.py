@@ -201,8 +201,8 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     # -------------------------------
     # PARTIAL PROPAGATION
     # -------------------------------
-    if state.synthesis:
-        if len(used_ids) < MIN_REQUIRED_CITATIONS:
+    if state.synthesis is not None:
+        if len(used_ids) < MIN_REQUIRED_CITATIONS or state.is_partial:
             state.synthesis.partial = True
 
         if state.synthesis.partial:

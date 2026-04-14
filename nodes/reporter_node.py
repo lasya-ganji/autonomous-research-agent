@@ -141,6 +141,50 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
         res = call_llm(prompt=prompt, temperature=0.1)
 
+
+        if isinstance(res, dict) and res.get("error"):
+            error_type_raw = res.get("error_type", "unknown_error")
+
+            if error_type_raw == "api_auth_error":
+                error_type = ErrorTypeEnum.api_error
+                severity = SeverityEnum.CRITICAL
+            elif error_type_raw == "timeout_error":
+                error_type = ErrorTypeEnum.timeout_error
+                severity = SeverityEnum.ERROR
+            elif error_type_raw == "network_error":
+                error_type = ErrorTypeEnum.network_error
+                severity = SeverityEnum.ERROR
+            else:
+                error_type = ErrorTypeEnum.system_error
+                severity = SeverityEnum.ERROR
+
+            state.errors.append(
+                ErrorLog(
+                    node="reporter_node",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    severity=severity,
+                    error_type=error_type,
+                    message=f"LLM failure: {res.get('error')}",
+                )
+            )
+
+            state.is_partial = True
+
+            state.report = ReportModel(
+                title="Research Report",
+                sections=["Report generation failed due to LLM error."],
+                citations=citations_list,
+                metadata={
+                    "query": state.query,
+                    "timestamp": datetime.now().isoformat(),
+                    "partial": True,
+                    "errors": [e.model_dump() for e in state.errors],
+                },
+            )
+
+            state.node_execution_count += 1
+            return state
+
         response = res.get("content", "")
         usage = res.get("usage", {}) or {}
 
@@ -192,10 +236,8 @@ def reporter_node(state: ResearchState) -> ResearchState:
             state.node_execution_count += 1
             return state
 
-        # -------------------------------
-        # FINAL PARTIAL FLAG
-        # -------------------------------
         partial_flag = (
+            state.is_partial or
             state.synthesis.partial or
             state.abort or
             len(used_ids) < MIN_REQUIRED_CITATIONS
@@ -209,7 +251,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         # -------------------------------
         state.report = ReportModel(
             title="Research Report",
-            sections=[response],
+            sections=[response] if response else ["No structured report generated."],
             citations=citations_list,
             metadata={
                 "query": state.query,
