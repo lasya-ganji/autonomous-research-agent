@@ -97,7 +97,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 "reason": "api_error",
                 "partial_trigger": "api_failure",
                 "next_node": state.next_node,
-                "execution_count": state.node_execution_count + 1,
+                "execution_count": state.node_execution_count,
                 "retry_count": state.search_retry_count,
                 "replan_count": state.replan_count,
                 "abort": True,
@@ -112,7 +112,6 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 {"next_node": state.next_node, "reason": "api_error"}
             )
 
-            state.node_execution_count += 1
             return state
         
 
@@ -153,7 +152,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 "reason": message,
                 "partial_trigger": trigger,
                 "next_node": state.next_node,
-                "execution_count": state.node_execution_count + 1,
+                "execution_count": state.node_execution_count,
                 "retry_count": state.search_retry_count,
                 "replan_count": state.replan_count,
                 "abort": state.abort,
@@ -168,7 +167,6 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 {"next_node": state.next_node, "reason": message}
             )
 
-            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -242,7 +240,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             "decision": decision,
             "reason": reason,
             "next_node": state.next_node,
-            "execution_count": state.node_execution_count + 1,
+            "execution_count": state.node_execution_count,
             "retry_count": state.search_retry_count,
             "replan_count": state.replan_count,
             "abort": state.abort,
@@ -257,7 +255,6 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             {"next_node": state.next_node, "reason": reason}
         )
 
-        state.node_execution_count += 1
         return state
 
     except Exception as e:
@@ -280,5 +277,4 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             {"next_node": "reporter", "reason": "exception"}
         )
 
-        state.node_execution_count += 1
         return state

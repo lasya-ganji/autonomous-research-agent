@@ -254,12 +254,15 @@ if run_button:
         if node_logs:
             for node, data in node_logs.items():
                 if node == "citation":
-                    continue  # hide test-only duplicate; keep CITATION_MANAGER for UI
+                    continue 
                 with st.expander(f"{node} NODE"):
                     
                     debug_data = {k: v for k, v in data.items() if k != "_trace"}
 
                     if debug_data:
+                        if node == "SUPERVISOR" and "execution_count" in debug_data:
+                            debug_data["execution_count"] = f"{debug_data['execution_count']} (at supervisor stage)"
+
                         st.json(debug_data)
                     else:
                         st.info("No debug data available")
@@ -272,6 +275,8 @@ if run_button:
         st.subheader("Execution Metrics")
         st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
         st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
+        
+        st.write(f"Final Node Execution Count: {result.get('node_execution_count', 0)}")
 
         if result.get("abort"):
             st.error("Execution stopped due to cost limit")
