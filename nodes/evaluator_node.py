@@ -6,11 +6,10 @@ from config.constants.node_constants.node_names import NodeNames
 from config.constants.node_constants.evaluator_constants import (
     CONFIDENCE_THRESHOLD,
     LOW_CONFIDENCE_THRESHOLD,
-    MAX_SEARCH_RETRIES,
+    MAX_EVALUATOR_RETRIES,
     MAX_REPLANS
 )
 
-from models import state
 from models.evaluation_models import EvaluationResult, StepEvaluation
 from models.enums import ErrorTypeEnum, SeverityEnum
 from models.error_models import ErrorLog
@@ -163,7 +162,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             state.failure_reason = ""
 
         else:
-            if state.search_retry_count < MAX_SEARCH_RETRIES and not no_improvement:
+            if state.search_retry_count < MAX_EVALUATOR_RETRIES and not no_improvement:
                 decision = "retry"
                 state.search_retry_count += 1
                 state.failure_reason = (

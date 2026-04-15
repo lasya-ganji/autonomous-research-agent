@@ -42,16 +42,3 @@ def validate_url(url: str) -> CitationStatus:
 
     _url_cache[url] = status
     return status
-
-
-def build_citation(result, citation_id: str) -> Citation:
-    url = str(getattr(result, "url", ""))
-
-    return Citation(
-        citation_id=citation_id,
-        title=getattr(result, "title", "Untitled"),
-        url=url,
-        quality_score=float(getattr(result, "quality_score", 0.5) or 0.5),
-        status=validate_url(url),
-        date_accessed=datetime.now().isoformat()
-    )

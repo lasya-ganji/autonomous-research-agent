@@ -1,10 +1,5 @@
 from enum import Enum
 
-class DecisionEnum(str, Enum):
-    retry = "retry"
-    replan = "replan"
-    proceed = "proceed"
-
 
 class CitationStatus(str, Enum):
     valid = "valid"
