@@ -6,15 +6,21 @@ import os
 from dotenv import load_dotenv
 from config.constants.node_constants.search_constants import TAVILY_MAX_RESULTS
 
-load_dotenv()
+def get_tavily_client():
+    load_dotenv()
+    api_key = os.getenv("TAVILY_API_KEY")
 
-client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+    if not api_key:
+        raise ValueError("Missing TAVILY_API_KEY")
+
+    return TavilyClient(api_key=api_key)
 
 
 def search_tool(query: str) -> Union[List[SearchResult], dict]:
     print(f"[SEARCH TOOL] Query: {query}")
 
     try:
+        client = get_tavily_client()
         response = client.search(query=query, max_results=TAVILY_MAX_RESULTS)
 
         results: List[SearchResult] = []

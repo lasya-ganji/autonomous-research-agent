@@ -279,7 +279,24 @@ if run_button:
         st.write(f"Final Node Execution Count: {result.get('node_execution_count', 0)}")
 
         if result.get("abort"):
-            st.error("Execution stopped due to cost limit")
+            errors = result.get("errors", [])
+
+            has_cost_error = any(
+                (e.get("error_type") if isinstance(e, dict) else e.error_type) == "budget_exceeded"
+                for e in errors
+            )
+
+            has_api_error = any(
+                (e.get("error_type") if isinstance(e, dict) else e.error_type) == "api_error"
+                for e in errors
+            )
+
+            if has_cost_error:
+                st.error("Execution stopped due to cost limit")
+            elif has_api_error:
+                st.error("Execution stopped due to API failure (invalid key or service issue)")
+            else:
+                st.error("Execution stopped due to system error")
 
         st.subheader("Errors")
         errors = result.get("errors")

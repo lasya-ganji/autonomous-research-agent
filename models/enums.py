@@ -27,3 +27,7 @@ class ErrorTypeEnum(str, Enum):
     system_error = "system_error"
     budget_exceeded = "budget_exceeded"
     loop_limit = "loop_limit"
+    api_error = "api_error"
+    timeout_error = "timeout_error"
+    network_error = "network_error"
+    unknown_error = "unknown_error"

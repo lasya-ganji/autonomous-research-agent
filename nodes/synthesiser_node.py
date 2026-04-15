@@ -71,7 +71,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
-            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -133,7 +132,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
-            state.node_execution_count += 1
             return state
 
         context_docs = list(dict.fromkeys(context_docs))
@@ -183,7 +181,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
-            state.node_execution_count += 1
             return state
 
         response_content = res.get("content", "") or ""
@@ -205,7 +202,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             state.is_partial = True
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
-            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -231,7 +227,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     message=f"Cost exceeded: ₹{state.total_cost}",
                 )
             )
-            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -318,7 +313,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         conflicts = parsed.get("conflicts", [])
 
-        evaluator_failed = state.node_logs.get("evaluator_node", {}).get("all_failed", False)
+        evaluator_failed = state.node_logs.get(NodeNames.EVALUATOR, {}).get("all_failed", False)
 
         partial_flag = (
             state.is_partial or
@@ -361,7 +356,6 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             {"claims": len(claims)}
         )
 
-        state.node_execution_count += 1
         return state
 
     except Exception as e:

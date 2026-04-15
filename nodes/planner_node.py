@@ -191,7 +191,6 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
                     message=f"Cost exceeded limit: ₹{state.total_cost}",
                 )
             )
-            state.node_execution_count += 1
             return state
 
         invalid_steps = 0
@@ -328,7 +327,6 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
             {"num_steps": len(plan)}
         )
 
-        state.node_execution_count += 1
         return state
 
     except Exception as e:
@@ -348,5 +346,4 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
             PlanStep(step_id=1, question=fallback, priority=1)
         ]
 
-        state.node_execution_count += 1
         return state

@@ -6,14 +6,14 @@ from langsmith.run_helpers import get_current_run_tree
 
 from config.constants.llm_constants import LLM_MODEL, DEFAULT_TEMPERATURE
 
-load_dotenv()
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
+def get_openai_client():
+    load_dotenv()
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @traceable(name="llm_call")
 def call_llm(prompt: str, temperature: float = DEFAULT_TEMPERATURE):
     try:
+        client = get_openai_client()
         messages = [
             {
                 "role": "system",

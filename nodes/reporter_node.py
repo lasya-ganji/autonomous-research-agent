@@ -56,7 +56,6 @@ def reporter_node(state: ResearchState) -> ResearchState:
             }
 
             log_node_execution("reporter_node", {}, {})
-            state.node_execution_count += 1
             return state
 
         # -------------------------------
@@ -146,7 +145,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         if isinstance(res, dict) and res.get("error"):
             error_type_raw = res.get("error_type", "unknown_error")
 
-            if error_type_raw == "api_auth_error":
+            if error_type_raw == "api_error":
                 error_type = ErrorTypeEnum.api_error
                 severity = SeverityEnum.CRITICAL
             elif error_type_raw == "timeout_error":
@@ -183,7 +182,6 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 },
             )
 
-            state.node_execution_count += 1
             return state
 
         response = res.get("content", "")
@@ -234,7 +232,6 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 },
             )
 
-            state.node_execution_count += 1
             return state
 
         partial_flag = (
@@ -290,7 +287,6 @@ def reporter_node(state: ResearchState) -> ResearchState:
             {"citations": len(used_ids)}
         )
 
-        state.node_execution_count += 1
         return state
 
     except Exception as e:

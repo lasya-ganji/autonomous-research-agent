@@ -63,6 +63,7 @@ class ResearchState(BaseModel):
 
     # ERRORS
     errors: List[ErrorLog] = Field(default_factory=list)
+    api_failure: bool = False
 
     # OBSERVABILITY
     node_logs: Dict[str, Any] = Field(default_factory=dict)
@@ -71,6 +72,7 @@ class ResearchState(BaseModel):
     total_cost: float = 0.0
     cost_limit: float = 2.0
     abort: bool = False
+    
 
     # ROUTING
     next_node: Optional[str] = None

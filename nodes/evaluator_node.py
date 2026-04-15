@@ -237,7 +237,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             }
         )
 
-        state.node_execution_count += 1
         return state
 
     except Exception as e:
