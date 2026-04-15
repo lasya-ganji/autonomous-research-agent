@@ -20,14 +20,6 @@ class ResearchState(BaseModel):
 
     # SEARCH
     search_results: Dict[int, List[SearchResult]] = Field(default_factory=dict)
-    
-
-    # DEDUP
-    #deduplicated_urls: Set[str] = Field(default_factory=set)
-
-    # CONTEXT
-    #context_docs: List[str] = Field(default_factory=list)
-    
 
     # EVALUATION
     evaluation: Optional[EvaluationResult] = None
