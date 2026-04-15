@@ -137,15 +137,16 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 message = "Too many failed retrieval attempts"
                 trigger = "search_failure_threshold"
 
-            state.errors.append(
-                ErrorLog(
-                    node="supervisor_node",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
-                    severity=SeverityEnum.CRITICAL,
-                    error_type=error_type,
-                    message=message
+            if not any(e.error_type == error_type for e in state.errors):
+                state.errors.append(
+                    ErrorLog(
+                        node="supervisor_node",
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        severity=SeverityEnum.CRITICAL,
+                        error_type=error_type,
+                        message=message
+                    )
                 )
-            )
 
             state.node_logs[NodeNames.SUPERVISOR] = {
                 "decision": decision,

@@ -79,7 +79,7 @@ def _search_with_retry(query, state):
                 ErrorLog(
                     node="searcher_node",
                     timestamp=datetime.now().isoformat(),
-                    severity=SeverityEnum[severity],
+                    severity=SeverityEnum[severity] if severity in SeverityEnum.__members__ else SeverityEnum.WARNING,
                     error_type=ErrorTypeEnum(error_type),
                     message=f"Search tool error: {message}"
                 )

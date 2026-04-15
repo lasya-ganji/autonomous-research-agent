@@ -159,6 +159,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             if raw_type == "api_error":
                 error_type = ErrorTypeEnum.api_error
                 severity = SeverityEnum.CRITICAL
+                state.api_failure = True
             elif raw_type == "timeout_error":
                 error_type = ErrorTypeEnum.timeout_error
                 severity = SeverityEnum.ERROR

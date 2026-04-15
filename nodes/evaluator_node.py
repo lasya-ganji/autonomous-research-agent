@@ -35,10 +35,6 @@ def evaluator_node(state: ResearchState) -> ResearchState:
     if state.node_logs is None:
         state.node_logs = {}
 
-    # IMPORTANT: reset only per-run counters
-    state.failure_counts["search_failures"] = 0
-    state.failure_counts["low_confidence"] = 0
-
     input_data: Dict = {
         "num_steps": len(state.research_plan),
         "retry_count": state.search_retry_count,

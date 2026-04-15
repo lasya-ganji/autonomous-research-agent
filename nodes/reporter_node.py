@@ -148,6 +148,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             if error_type_raw == "api_error":
                 error_type = ErrorTypeEnum.api_error
                 severity = SeverityEnum.CRITICAL
+                state.api_failure = True
             elif error_type_raw == "timeout_error":
                 error_type = ErrorTypeEnum.timeout_error
                 severity = SeverityEnum.ERROR
