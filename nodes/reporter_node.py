@@ -321,5 +321,5 @@ def reporter_node(state: ResearchState) -> ResearchState:
         }
 
         log_node_execution("reporter_node", {}, {})
-        state.node_execution_count += 1
+
         return state

@@ -154,6 +154,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     message="No research plan available"
                 )
             )
+            state.node_execution_count += 1
             return state
 
         steps = sorted(state.research_plan, key=lambda x: x.priority)
@@ -179,6 +180,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             if getattr(state, "api_failure", False):
                 step_status[step_id] = "failed"
                 state.search_results[step_id] = []
+                state.node_execution_count += 1
                 return state
 
             # -------------------------------
@@ -194,6 +196,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 if getattr(state, "api_failure", False):
                     step_status[step_id] = "failed"
                     state.search_results[step_id] = []
+                    state.node_execution_count += 1
                     return state
 
             print(f"[SEARCH] Results fetched: {len(raw_results)}")
@@ -378,5 +381,4 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
     state.node_logs[NodeNames.SEARCHER] = existing_log
 
-    state.node_execution_count += 1
     return state

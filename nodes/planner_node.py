@@ -163,7 +163,6 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
 
             if error_type == ErrorTypeEnum.api_error:
                 state.is_partial = True
-                state.node_execution_count += 1
                 return state
 
             response = ""

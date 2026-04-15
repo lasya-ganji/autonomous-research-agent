@@ -384,5 +384,4 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             {"error": str(e)}
         )
 
-        state.node_execution_count += 1
         return state

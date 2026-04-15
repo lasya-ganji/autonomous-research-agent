@@ -67,6 +67,7 @@ def compute_similarity_score(claim_text: str, chunk: str) -> float:
 
 
 @trace_node(NodeNames.CITATION_MANAGER)
+
 def citation_manager_node(state: ResearchState) -> ResearchState:
 
     # -------------------------------
@@ -244,5 +245,4 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         }
     )
 
-    state.node_execution_count += 1
     return state

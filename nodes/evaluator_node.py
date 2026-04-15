@@ -267,5 +267,4 @@ def evaluator_node(state: ResearchState) -> ResearchState:
             {"decision": "forced_proceed"}
         )
 
-        state.node_execution_count += 1
         return state
