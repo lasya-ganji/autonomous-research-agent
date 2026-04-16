@@ -19,175 +19,194 @@ graph TD
     SY --> CM[Citation Manager]
     CM --> RE
     RE --> END([Final Report])
-
 ```
+
 ---
 
 ## Node Responsibilities
 
 | Node | Responsibility |
 |------|---------------|
-| Supervisor | Reads evaluation decision, sets next node, enforces execution limit, cost limit, and API failure termination |
-| Planner | Decomposes query into ≤3 prioritised sub-questions using LLM |
-| Searcher | Executes Tavily search → deduplication → scraping → builds citations |
-| Evaluator | Scores results → computes confidence → decides retry/replan/proceed |
-| Synthesiser | Builds context → generates claims with citations |
-| Citation Manager | Validates citations and verifies claims against source chunks |
-| Reporter | Maps citation IDs → generates final structured report |
+| Supervisor | Controls execution flow, enforces limits, routes decisions |
+| Planner | Decomposes query into ≤3 sub-questions |
+| Searcher | Retrieves and processes sources |
+| Evaluator | Scores results and decides next step |
+| Synthesiser | Generates claims from sources |
+| Citation Manager | Verifies claims against sources |
+| Reporter | Produces final structured report |
 
 ---
 
 # 2. State Schema
 
-All nodes share a single `ResearchState` (Pydantic BaseModel).
+All nodes share a single `ResearchState`.
 
 ---
 
 ## Input
 
-| Field | Type | Description |
-|------|------|------------|
-| query | str | User research query |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| query | str | User query | Entry point for the system |
 
 ---
 
 ## Planner
 
-| Field | Type | Description |
-|------|------|------------|
-| research_plan | List[PlanStep] | Up to 3 prioritised sub-questions |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| research_plan | List[PlanStep] | Sub-questions | Breaks complex query into manageable steps |
 
 ---
 
 ## Search
 
-| Field | Type | Description |
-|------|------|------------|
-| search_results | Dict[int, List[SearchResult]] | Step-wise search results |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| search_results | Dict[int, List[SearchResult]] | Results per step | Enables step-wise evaluation |
 
 ---
 
 ## Evaluation
 
-| Field | Type | Description |
-|------|------|------------|
-| evaluation | Optional[EvaluationResult] | Evaluation output |
-| failure_reason | str | Reason for failure |
-| overall_confidence | float | Aggregate confidence score |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| evaluation | Optional[EvaluationResult] | Evaluation output | None on first run → triggers planner |
+| overall_confidence | float | Confidence score | Drives routing decisions |
+| failure_reason | str | Failure explanation | Helps planner during replan |
 
 ---
 
 ## Retry / Replan
 
-| Field | Type | Description |
-|------|------|------------|
-| search_retry_count | int | Retry attempts |
-| replan_count | int | Replan attempts |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| search_retry_count | int | Retry attempts | Prevents infinite retry loops |
+| replan_count | int | Replan attempts | Prevents infinite replanning |
 
 ---
 
 ## Execution
 
-| Field | Type | Description |
-|------|------|------------|
-| node_execution_count | int | Total node executions |
-| unresolved_steps | List[int] | Steps not resolved |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| node_execution_count | int | Total executions | Enforces execution cap (12) |
+| unresolved_steps | List[int] | Failed steps | Tracks incomplete coverage |
 
 ---
 
 ## Output
 
-| Field | Type | Description |
-|------|------|------------|
-| synthesis | Optional[SynthesisModel] | Claims output |
-| report | Optional[ReportModel] | Final report |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| synthesis | Optional[SynthesisModel] | Generated claims | Intermediate output |
+| report | Optional[ReportModel] | Final report | End result |
 
 ---
 
 ## Citations
 
-| Field | Type | Description |
-|------|------|------------|
-| citations | Dict[str, Citation] | Citation registry |
-| used_citation_ids | Set[str] | Referenced citations |
-| citation_mapping | Dict[str, str] | Internal → output mapping |
-| citation_chunks | Dict[str, List[str]] | Source chunks for verification |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| citations | Dict[str, Citation] | Citation registry | Single source of truth |
+| used_citation_ids | Set[str] | Used citations | Ensures clean output |
+| citation_mapping | Dict[str, str] | ID mapping | User-friendly numbering |
+| citation_chunks | Dict[str, List[str]] | Source chunks | Used for verification |
+
+---
+
+## Failure Tracking
+
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| failure_counts | Dict[str, int] | Tracks failures | Used in routing decisions |
 
 ---
 
 ## Control Flags
 
-| Field | Type | Description |
-|------|------|------------|
-| is_partial | bool | Partial output flag |
-| api_failure | bool | API failure trigger |
-| abort | bool | Cost-based abort |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| is_partial | bool | Partial output flag | Indicates incomplete execution |
+| api_failure | bool | API failure flag | Triggers early termination |
+| abort | bool | Cost abort flag | Stops execution if budget exceeded |
 
 ---
 
 ## Observability
 
-| Field | Type | Description |
-|------|------|------------|
-| errors | List[ErrorLog] | Structured error logs |
-| node_logs | Dict[str, Any] | Per-node logs |
-| next_node | Optional[str] | Routing target |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| errors | List[ErrorLog] | Error logs | Debugging and traceability |
+| node_logs | Dict[str, Any] | Node logs | Observability |
+| next_node | Optional[str] | Routing target | Used by LangGraph |
 
 ---
 
 ## Cost Tracking
 
-| Field | Type | Description |
-|------|------|------------|
-| total_tokens | int | Token usage |
-| total_cost | float | Cost (INR) |
-| cost_limit | float | Budget limit |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| total_tokens | int | Tokens used | Observability |
+| total_cost | float | Cost (INR) | Budget tracking |
+| cost_limit | float | Max cost | Prevents excessive spend |
 
 ---
 
-## Latency Tracking
+## Latency
 
-| Field | Type | Description |
-|------|------|------------|
-| start_time | float | Start timestamp |
-| elapsed_time | float | Execution duration |
+| Field | Type | Description | Rationale |
+|------|------|------------|-----------|
+| start_time | float | Start time | Measure latency |
+| elapsed_time | float | Runtime | Performance tracking |
 
 ---
 
 # 3. Tool Integration
 
-| Tool | Purpose | Output | Failure Handling |
-|------|--------|--------|-----------------|
-| call_llm | LLM completion | `{content, usage}` | Returns empty + error |
-| search_tool | Tavily search | `List[SearchResult]` OR error dict | Structured error response |
-| scrape_url | Extract content | `{content, publish_date}` | Fallback scraping |
-| get_embedding | Text embedding | Vector | Returns None on failure |
-| validate_url | URL validation | valid/stale/broken | Handles HTTP errors |
-| get_dynamic_weights | LLM weight generation | scoring weights | fallback defaults |
+| Tool | Purpose | Input | Output | Failure Handling |
+|------|--------|------|--------|-----------------|
+| call_llm | LLM completion via GPT-4o-mini | prompt: str, temperature: float | {content, usage} | Returns empty + error |
+| search_tool | Web search via Tavily | query: str | List[SearchResult] OR error dict | Structured error response |
+| scrape_url | Full-page content extraction | url: str | {content, publish_date} | Trafilatura → BeautifulSoup fallback |
+| get_embedding | Local embedding model | text: str | List[float] | Returns None on failure |
+| validate_url | URL reachability check | url: str | CitationStatus | Handles HTTP errors |
+| get_dynamic_weights | LLM-based scoring weights | query: str, state | Dict[str, float] | Falls back to defaults |
 
 ---
 
 # 4. Citation Design
 
-## Citation Model
+## Citation Schema
 
-- Central registry: `state.citations`
-- Each citation has:
-  - quality_score
-  - validation status
+```python
+class Citation(BaseModel):
+    citation_id: str
+    url: HttpUrl
+    title: str
+    author: Optional[str]
+    date_accessed: str
+    quality_score: float
+    status: CitationStatus
 
----
+class Claim(BaseModel):
+    text: str
+    citation_ids: List[str]
+    confidence: float
+    verified: bool
+    citation_confidence: float
+    citation_score_map: Dict[str, float]
+    hallucinated_citations: List[str]
+```
 
-## Claim Verification
+## Hallucination Detection
 
 A citation is considered hallucinated if:
-
-- No chunks available  
+- No content available  
 - URL invalid  
 - similarity score ≤ 0.4  
 
-A claim is marked **unverified** if:
-
+A claim is unverified if:
 - no valid citations  
 - OR average similarity ≤ 0.5  
 
@@ -200,61 +219,91 @@ A claim is marked **unverified** if:
   2. Synthesis selection  
   3. Citation verification  
 
-- Reporter only uses **verified citations**
+Only verified citations appear in final output.
 
 ---
 
-# 5. Known Limitations
-
-- No persistent memory across runs  
-- Sequential execution (no parallelism)  
-- LLM-dependent conflict detection  
-- Embedding model loads at startup  
-- No fallback LLM provider  
-
----
-
-# 6. Cost
-
-| Metric | Value |
-|------|------|
-| Avg tokens | ~7400 |
-| Avg cost | ~₹0.13 |
-| Max budget | ₹2.0 |
-
-Worst case (retry + replan): ~₹0.22
-
----
-
-# 7. Key Challenges
+# 5. Challenges
 
 ## 1. Replanning Loop Prevention
-- MAX_RETRIES = 1  
-- MAX_REPLANS = 1  
-- Execution limit = 12  
 
-Prevents infinite loops.
+**Problem:**  
+Unanswerable queries can cause infinite retry/replan loops.
+
+**Solution:**  
+- MAX_SEARCH_RETRIES = 1  
+- MAX_REPLANS = 1  
+- MAX_NODE_EXECUTIONS = 12  
+- Supervisor forces proceed after limits  
+
+**Limitation:**  
+May terminate early for complex queries.
 
 ---
 
-## 2. Citation Quality Control
-- 3-stage filtering pipeline  
-- Only verified citations appear in output  
+## 2. Citation Quality vs Coverage
+
+**Problem:**  
+Too many sources reduce quality, too few reduce coverage.
+
+**Solution:**  
+- Filtering at search stage  
+- Top-k selection in synthesis  
+- Final verification in citation manager  
+
+**Limitation:**  
+Some useful low-quality sources may be dropped.
 
 ---
 
 ## 3. Contradictory Sources
-- Conflicts preserved, not resolved  
-- Multiple citations allowed per claim  
+
+**Problem:**  
+Different sources may provide conflicting information.
+
+**Solution:**  
+- The synthesiser prompts the LLM to explicitly identify conflicts and return them as a `conflicts` array in the structured output.  
+- The Claim model supports multiple `citation_ids`, allowing conflicting sources to be cited together.  
+
+**Limitation:**  
+Conflict detection is LLM-dependent and may miss subtle contradictions or numerical inconsistencies.
 
 ---
 
-## 4. Stateless System Handling
-- Deduplication handled during search  
-- Step-based tracking prevents redundancy  
+## 4. Stateless System
+
+**Problem:**  
+The system has no memory across runs, leading to repeated work.
+
+**Solution:**  
+- Within a run, deduplication is handled using a multi-stage pipeline (URL, title, semantic).  
+- `search_results` is keyed by `step_id`, enabling step-wise tracking and evaluation.  
+
+**Limitation:**  
+No cross-session memory — repeated queries are processed from scratch.
 
 ---
 
 ## 5. Cost vs Quality Tradeoff
-- Cost limit enforced per run  
-- Partial output generated when limits hit  
+
+**Problem:**  
+More processing improves quality but increases cost.
+
+**Solution:**  
+- cost_limit enforcement  
+- execution limit  
+- partial output fallback  
+
+**Limitation:**  
+May stop before full coverage.
+
+---
+
+# 6. Cost Estimates
+
+| Scenario | Tokens | Cost |
+|----------|--------|------|
+| Normal | ~7400 | ₹0.13 |
+| Retry | ~9000 | ₹0.16 |
+| Replan | ~10500 | ₹0.18 |
+| Worst | ~13000 | ₹0.22 |
