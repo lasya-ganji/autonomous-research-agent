@@ -3,7 +3,6 @@ from models.state import ResearchState
 from nodes.searcher_node import searcher_node
 
 
-# 🔥 Mock result object (IMPORTANT FIX)
 class MockResult:
     def __init__(self, url, title, snippet):
         self.url = url

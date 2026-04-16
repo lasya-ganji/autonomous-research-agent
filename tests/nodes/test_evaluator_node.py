@@ -3,7 +3,6 @@ from models.state import ResearchState
 from nodes.evaluator_node import evaluator_node
 
 
-# 🔥 Mock SearchResult object
 class MockResult:
     def __init__(self, title="Test"):
         self.title = title
@@ -87,7 +86,7 @@ def test_evaluator_no_results():
     result = evaluator_node(state)
 
     assert result.evaluation is not None
-    assert len(result.errors) > 0  # ✅ error should be logged
+    assert len(result.errors) > 0  
 
 
 # -----------------------------
