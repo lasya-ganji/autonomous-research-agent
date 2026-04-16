@@ -1,18 +1,19 @@
 import os
-import json
-import re
 from openai import OpenAI
 from dotenv import load_dotenv
+from langsmith import traceable
+from langsmith.run_helpers import get_current_run_tree
 
-# Load environment variables
-load_dotenv()
+from config.constants.llm_constants import LLM_MODEL, DEFAULT_TEMPERATURE
 
-# Initialize OpenAI client
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+def get_openai_client():
+    load_dotenv()
+    return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-def call_llm(prompt: str, temperature: float = 0.2):
+@traceable(name="llm_call")
+def call_llm(prompt: str, temperature: float = DEFAULT_TEMPERATURE):
     try:
+        client = get_openai_client()
         messages = [
             {
                 "role": "system",
@@ -34,18 +35,55 @@ If JSON is requested:
         ]
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=LLM_MODEL,
             messages=messages,
             temperature=temperature
         )
 
         content = response.choices[0].message.content
+        usage = response.usage
 
-        print("\n[LLM RAW OUTPUT]:\n", content)
+        run = get_current_run_tree()
+        if run and usage:
+            run.extra = {
+                "token_usage": {
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": usage.total_tokens
+                }
+            }
 
-        return content
+        return {
+            "content": content,
+            "usage": {
+                "prompt_tokens": usage.prompt_tokens if usage else 0,
+                "completion_tokens": usage.completion_tokens if usage else 0,
+                "total_tokens": usage.total_tokens if usage else 0
+            }
+        }
 
     except Exception as e:
+        error_msg = str(e).lower()
+
+        # -------------------------------
+        # ERROR CLASSIFICATION
+        # -------------------------------
+        if any(x in error_msg for x in ["unauthorized", "invalid api key", "401"]):
+            error_type = "api_error"
+
+        elif any(x in error_msg for x in ["timeout", "timed out"]):
+            error_type = "timeout_error"
+
+        elif any(x in error_msg for x in ["connection", "network", "dns"]):
+            error_type = "network_error"
+
+        else:
+            error_type = "unknown_error"
+
         return {
-            "error": str(e)
+            "content": "",
+            "usage": {},
+            "error": str(e),
+            "error_type": error_type,
+            "error_source": "llm_call"
         }

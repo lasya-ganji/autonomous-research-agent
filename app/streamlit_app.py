@@ -1,5 +1,58 @@
+import os
+import logging
+import warnings
+import time
+
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("torch").setLevel(logging.ERROR)
+logging.basicConfig(level=logging.ERROR)
+
+warnings.filterwarnings("ignore")
+
 import streamlit as st
 from agent_runner import run_agent
+from models.enums import CitationStatus
+
+
+# ---------------- NODE NAME CONTRACT ----------------
+
+NODE_KEYS = {
+    "REPORT": "REPORTER",
+    "PLAN": "PLANNER",
+    "SEARCH": "SEARCHER",
+    "EVALUATION": "EVALUATOR",
+    "SYNTHESIS": "SYNTHESIS",
+    "CITATION": "CITATION_MANAGER",
+}
+
+
+# ---------------- UTIL ----------------
+
+def safe_get(obj, key, default=None):
+    try:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+    except Exception:
+        return default
+
+
+def get_node_time(node_logs, node_key):
+    node = node_logs.get(node_key, {})
+    trace = node.get("_trace", {})
+    total = trace.get("total_duration_s", 0)
+    runs = trace.get("run_count", 0)
+
+    return round(total, 2), runs
+
+
+def render_report(content):
+    st.markdown(content)
+
+
+# ---------------- PAGE ----------------
 
 st.set_page_config(
     page_title="Autonomous Research Agent",
@@ -7,10 +60,13 @@ st.set_page_config(
 )
 
 st.title("Autonomous Research Agent")
-st.markdown("Enter a query and get a structured, citation-backed research report.")
+st.markdown("Generate structured, citation-backed research reports.")
 
 query = st.text_input("Research Query", placeholder="Enter your query here...")
 run_button = st.button("Run Research")
+
+
+# ---------------- RUN ----------------
 
 if run_button:
 
@@ -18,16 +74,19 @@ if run_button:
         st.warning("Please enter a valid query.")
         st.stop()
 
+    start_time = time.time()
+
     with st.spinner("Running research agent..."):
         result = run_agent(query)
 
-    try:
-        if hasattr(result, "dict"):
-            result = result.dict()
-    except Exception:
-        pass
+    total_time = round(time.time() - start_time, 2)
 
-    st.success("Research completed successfully!")
+    if hasattr(result, "dict"):
+        result = result.dict()
+
+    st.success(f"Research completed in {total_time}s")
+
+    node_logs = result.get("node_logs", {})
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Report", "Plan", "Search", "Evaluation", "Synthesis", "Citations", "Debug"
@@ -35,25 +94,24 @@ if run_button:
 
     # ---------------- REPORT ----------------
     with tab1:
-        st.subheader("Final Report")
-
         report = result.get("report")
 
         if report:
-            try:
-                sections = report.sections
-            except AttributeError:
-                sections = report.get("sections")
-
+            sections = safe_get(report, "sections", [])
             if sections:
-                content = sections[0]
-
-            st.markdown(
-                f"<div style='font-size:16px; line-height:1.7'>{content}</div>",
-                unsafe_allow_html=True
-            )
+                render_report(sections[0])
+            else:
+                st.warning("Report content is empty.")
         else:
             st.error("No report generated.")
+
+        st.divider()
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['REPORT'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
+
 
     # ---------------- PLAN ----------------
     with tab2:
@@ -63,12 +121,18 @@ if run_button:
 
         if plan:
             for step in plan:
-                st.markdown(f"**Step {step.step_id}**")
-                st.write(step.question)
-                st.caption(f"Priority: {step.priority}")
+                st.markdown(f"**Step {safe_get(step,'step_id')}**")
+                st.write(safe_get(step, "question"))
+                st.caption(f"Priority: {safe_get(step,'priority')}")
                 st.divider()
         else:
             st.info("No plan available.")
+
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['PLAN'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- SEARCH ----------------
     with tab3:
@@ -76,26 +140,29 @@ if run_button:
 
         search_results = result.get("search_results")
 
-        if not search_results or all(len(v) == 0 for v in search_results.values()):
-            st.error("Search failed or no results found.")
+        if not search_results:
+            st.error("No results found.")
         else:
             for step_id, results in search_results.items():
-                with st.expander(f"Step {step_id}", expanded=False):
+                with st.expander(f"Step {step_id}"):
                     for r in results:
+                        st.markdown(f"**{safe_get(r,'title','Untitled')}**")
 
-                        st.markdown(f"**{r.title}**")
+                        snippet = safe_get(r, "snippet")
+                        if snippet:
+                            st.write(snippet)
 
-                        if r.snippet:
-                            st.write(r.snippet)
-
-                        st.caption(r.url)
-
-                        st.markdown(
-                            f"<small>Quality: {round(r.quality_score or 0,2)}</small>",
-                            unsafe_allow_html=True
-                        )
+                        st.caption(safe_get(r, "url", ""))
+                        st.caption(f"Quality: {round(safe_get(r,'quality_score',0),2)}")
 
                         st.divider()
+
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['SEARCH'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
+
 
     # ---------------- EVALUATION ----------------
     with tab4:
@@ -104,17 +171,23 @@ if run_button:
         evaluation = result.get("evaluation")
 
         if evaluation:
-            st.markdown(f"**Decision:** `{evaluation.decision}`")
-            st.markdown(f"**Avg Confidence:** `{round(result.get('overall_confidence',0),3)}`")
+            st.markdown(f"**Decision:** `{safe_get(evaluation,'decision')}`")
+            st.markdown(f"**Confidence:** `{round(result.get('overall_confidence',0),3)}`")
 
-            for step in evaluation.steps:
+            for step in safe_get(evaluation, "steps", []):
                 st.write({
-                    "step": step.step_id,
-                    "confidence": round(step.confidence_score, 3),
-                    "passed": step.passed
+                    "step": safe_get(step, "step_id"),
+                    "confidence": round(safe_get(step, "confidence_score", 0), 3),
+                    "passed": safe_get(step, "passed")
                 })
         else:
             st.info("No evaluation data available.")
+
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['EVALUATION'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- SYNTHESIS ----------------
     with tab5:
@@ -122,112 +195,133 @@ if run_button:
 
         synthesis = result.get("synthesis")
 
-        if synthesis and synthesis.claims:
-            for claim in synthesis.claims:
+        claims = safe_get(synthesis, "claims", [])
+        if claims:
+            for claim in claims:
+                st.markdown(f"- {safe_get(claim, 'text', '')}")
 
-                st.markdown(f"• {claim.text}")
+                citation_ids = safe_get(claim, "citation_ids", []) or []
+                verified = safe_get(claim, "verified", False)
+                citation_text = " ".join(citation_ids) if verified else "UNVERIFIED"
 
                 st.caption(
-                    f"Confidence: {round(claim.confidence,2)} | "
-                    f"Citations: {' '.join(claim.citation_ids)}"
+                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text}"
                 )
-
                 st.divider()
-
-            if synthesis.partial:
-                st.warning("Partial synthesis generated due to limited data.")
         else:
             st.info("No synthesis available.")
+
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['SYNTHESIS'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
 
     # ---------------- CITATIONS ----------------
     with tab6:
         st.subheader("Citations")
 
-        all_citations = result.get("citations", {})
-        used_ids = result.get("used_citation_ids", [])
-        mapping = result.get("citation_mapping", {})
+        report = result.get("report")
 
-        if all_citations and used_ids:
+        citations = safe_get(report, "citations", []) or []
+        if citations:
+            for c in citations:
+                cid = safe_get(c, "id")
+                title = safe_get(c, "title", "Untitled")
+                url = safe_get(c, "url", "")
+                quality = safe_get(c, "quality_score", None)
 
-            # Sort based on original numeric order
-            sorted_old_ids = sorted(
-                used_ids,
-                key=lambda x: int(x.strip("[]")) if x.strip("[]").isdigit() else float("inf")
-            )
+                st.markdown(f"**{cid} {title}**")
+                st.caption(url)
 
-            for old_id in sorted_old_ids:
-
-                c = all_citations.get(old_id)
-                if not c:
-                    continue
-
-                #  Safe ID mapping
-                new_id = mapping.get(old_id, old_id)
-
-                #  Safe title
-                title = getattr(c, "title", "Untitled Source")
-
-                #  Status handling
-                status_val = getattr(c, "status", "unknown")
-
-                if status_val == "valid":
-                    status_icon = "🟢"
-                elif status_val == "stale":
-                    status_icon = "🟡"
-                else:
-                    status_icon = "🔴"
-
-                quality = getattr(c, "quality_score", None)
-
-                if quality is None:
-                    quality = 0.0
-
-                # clamp (safety)
-                quality = max(0.0, min(float(quality), 1.0))
-
-                # Display
-                st.markdown(f"**{new_id} {status_icon} {title}**")
-
-                # URL safe display
-                try:
-                    st.caption(str(c.url))
-                except:
-                    st.caption("URL unavailable")
-
-                # Better UX: percentage
-                st.write(f"Quality: {round(quality * 100, 1)}%")
-
-                st.write(f"Status: `{status_val}`")
+                if quality is not None:
+                    st.caption(f"Quality: {round(quality, 3)}")
 
                 st.divider()
-
         else:
             st.info("No citations available.")
 
-    # ---------------- DEBUG ----------------
+        time_taken, runs = get_node_time(node_logs, NODE_KEYS['CITATION'])
+        if runs > 1:
+            st.caption(f"Time: {time_taken}s ({runs} runs)")
+        else:
+            st.caption(f"Time: {time_taken}s")
+
+    # ---------------- DEBUG / COST / ERRORS ----------------
     with tab7:
         st.subheader("Node Execution Details")
 
-        node_logs = result.get("node_logs", {})
-
         if node_logs:
             for node, data in node_logs.items():
-                with st.expander(f"{node.upper()} NODE"):
-                    st.json(data)
+                if node == "citation":
+                    continue 
+                with st.expander(f"{node} NODE"):
+                    
+                    debug_data = {k: v for k, v in data.items() if k != "_trace"}
+
+                    if debug_data:
+                        if node == "SUPERVISOR" and "execution_count" in debug_data:
+                            debug_data["execution_count"] = f"{debug_data['execution_count']} (at supervisor stage)"
+
+                        st.json(debug_data)
+                    else:
+                        st.info("No debug data available")
+
         else:
             st.info("No node logs available.")
 
         st.divider()
 
-        st.subheader("Errors")
+        st.subheader("Execution Metrics")
+        st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
+        st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
+        
+        st.write(f"Final Node Execution Count: {result.get('node_execution_count', 0)}")
 
+        if result.get("abort"):
+            errors = result.get("errors", [])
+
+            has_cost_error = any(
+                (e.get("error_type") if isinstance(e, dict) else e.error_type) == "budget_exceeded"
+                for e in errors
+            )
+
+            has_api_error = any(
+                (e.get("error_type") if isinstance(e, dict) else e.error_type) == "api_error"
+                for e in errors
+            )
+
+            if has_cost_error:
+                st.error("Execution stopped due to cost limit")
+            elif has_api_error:
+                st.error("Execution stopped due to API failure (invalid key or service issue)")
+            else:
+                st.error("Execution stopped due to system error")
+
+        st.subheader("Errors")
         errors = result.get("errors")
 
-        if errors:
+        if errors and len(errors) > 0:
+            st.error(f"{len(errors)} errors detected")
+
             for err in errors:
-                try:
-                    st.error(f"[{err.severity}] {err.node} → {err.message}")
-                except Exception:
-                    st.error(str(err))
+                # HANDLE BOTH CASES (object + dict)
+                if isinstance(err, dict):
+                    node = err.get("node")
+                    severity = err.get("severity")
+                    message = err.get("message")
+                    timestamp = err.get("timestamp")
+                    error_type = err.get("error_type")
+                else:
+                    node = err.node
+                    severity = err.severity
+                    message = err.message
+                    timestamp = err.timestamp
+                    error_type = err.error_type
+
+                with st.expander(f"{severity} • {node}"):
+                    st.write(f"**Message:** {message}")
+                    st.write(f"**Type:** {error_type}")
+                    st.write(f"**Time:** {timestamp}")
         else:
             st.success("No errors encountered.")

@@ -4,28 +4,45 @@ from services.evaluation.weight_service import get_dynamic_weights
 from urllib.parse import urlparse
 from datetime import datetime
 import re
+import math
+import numpy as np
+from collections import Counter
+from services.retrieval.embedding_service import get_embedding
 
-
-DEFAULT_WEIGHTS = {
-    "relevance": 0.5,
-    "recency": 0.2,
-    "domain": 0.2,
-    "depth": 0.1
-}
-
-
-MIN_THRESHOLDS = {
-    "relevance": 0.35,
-    "recency": 0.1,
-    "domain": 0.1,
-    "depth": 0.05
-}
-
-
-# WEIGHT VALIDATION (SOFT)
+from config.constants.scoring_constants import (
+    DEFAULT_WEIGHTS,
+    MIN_THRESHOLDS,
+    SEMANTIC_WEIGHT,
+    KEYWORD_WEIGHT,
+    TITLE_WEIGHT,
+    SEMANTIC_BOOST_THRESHOLD,
+    KEYWORD_BOOST_THRESHOLD,
+    TITLE_BOOST_THRESHOLD,
+    MAX_TF_NORMALIZATION,
+    RELEVANCE_MIX,
+    SECONDARY_MIX,
+    QUALITY_SCORE_MIN,
+    QUALITY_SCORE_FILTER,
+    DEPTH_HIGH_WORDS, DEPTH_MED_WORDS, DEPTH_LOW_WORDS,
+    DEPTH_HIGH_SCORE, DEPTH_MED_SCORE, DEPTH_LOW_SCORE, DEPTH_MIN_SCORE,
+    RECENCY_HIGH_WEIGHT, RECENCY_MED_WEIGHT, RECENCY_LOW_WEIGHT,
+    RECENCY_HIGH_DAYS, RECENCY_MED_DAYS, RECENCY_LOW_DAYS, RECENCY_STATIC_DAYS,
+    RECENCY_MIN_SCORE, OUTDATED_YEAR_THRESHOLD,
+    RELEVANCE_DUAL_BOOST, RELEVANCE_TITLE_BOOST, RELEVANCE_KEYWORD_PENALTY,
+    WEIGHT_MAX_CAP,
+    DOC_EMBED_CHAR_LIMIT,
+    RECENCY_MAX_YEAR_DIFF,
+    RECENCY_DAYS_PER_YEAR,
+    RECENCY_MAX_DAYS_OLD,
+    DOMAIN_SCORE_HIGH_AUTHORITY, DOMAIN_SCORE_RESEARCH, DOMAIN_SCORE_GOV_EDU,
+    DOMAIN_SCORE_TRUSTED, DOMAIN_SCORE_NEWS, DOMAIN_SCORE_TECH_BLOG,
+    DOMAIN_SCORE_LOW_QUALITY, DOMAIN_SCORE_BLOG_SUBDOMAIN, DOMAIN_SCORE_DEFAULT,
+    DOMAIN_BLOG_SUBSTRINGS,
+    HIGH_AUTHORITY_DOMAINS, RESEARCH_PLATFORM_DOMAINS, TRUSTED_KNOWLEDGE_DOMAINS,
+    TECH_BLOG_DOMAINS, NEWS_DOMAINS, LOW_QUALITY_DOMAINS
+)
 
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
-
     if not weights:
         return DEFAULT_WEIGHTS
 
@@ -33,7 +50,7 @@ def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
     weights = {k: v / total for k, v in weights.items()}
 
     for k in weights:
-        weights[k] = max(MIN_THRESHOLDS.get(k, 0), min(weights[k], 0.6))
+        weights[k] = max(MIN_THRESHOLDS.get(k, 0), min(weights[k], WEIGHT_MAX_CAP))
 
     total = sum(weights.values()) or 1
     weights = {k: v / total for k, v in weights.items()}
@@ -41,153 +58,209 @@ def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
     return weights
 
 
-# RELEVANCE (STRONG FALLBACK)
+def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float:
+    title = (result.title or "")
+    snippet = (result.snippet or "")
+    content = (result.content or "")
 
-def compute_relevance(result: SearchResult, query: str) -> float:
+    doc_text = f"{title} {snippet} {content}".strip().lower()
+    query = query.strip().lower()
 
-    query_words = set(query.lower().split())
+    if not doc_text or not query:
+        return 0.0
 
-    title = (result.title or "").lower()
-    snippet = (result.snippet or "").lower()
-    content = (result.content or "").lower()
+    query_terms = query.split()
+    doc_terms = doc_text.split()
 
-    combined = f"{title} {snippet} {content}"
-    words = set(combined.split())
+    # -------------------------------
+    # KEYWORD SCORE 
+    # -------------------------------
+    doc_tf = Counter(doc_terms)
 
-    # keyword overlap
-    keyword = len(query_words & words) / (len(query_words) or 1)
+    keyword_score = 0.0
+    for term in query_terms:
+        if term in doc_tf:
+            keyword_score += min(doc_tf[term] / MAX_TF_NORMALIZATION, 1.0)
 
-    # title match
-    title_words = set(title.split())
+    keyword_score = keyword_score / max(len(query_terms), 1)
+
+    # -------------------------------
+    # SEMANTIC SCORE
+    # -------------------------------
+    if query_emb is None:
+        query_emb = get_embedding(query)
+
+    doc_emb = get_embedding(doc_text[:DOC_EMBED_CHAR_LIMIT])
+
+    if query_emb is not None and doc_emb is not None:
+        q = np.array(query_emb)
+        d = np.array(doc_emb)
+
+        denom = np.linalg.norm(q) * np.linalg.norm(d)
+        semantic_score = float(np.dot(q, d) / denom) if denom > 0 else 0.0
+
+        semantic_score = max(0.0, min(semantic_score, 1.0))
+    else:
+        semantic_score = 0.0
+
+    # -------------------------------
+    # TITLE SCORE
+    # -------------------------------
+    title_words = set(title.lower().split())
+    query_words = set(query_terms)
+
     title_score = len(query_words & title_words) / (len(query_words) or 1)
 
-    # pseudo-semantic (important before embeddings)
-    coverage = min(len(words) / 200, 1.0)
+    base = (
+        SEMANTIC_WEIGHT * semantic_score +
+        KEYWORD_WEIGHT * keyword_score +
+        TITLE_WEIGHT * title_score
+    )
 
-    base = 0.6 * keyword + 0.2 * title_score + 0.2 * coverage
+    if semantic_score > SEMANTIC_BOOST_THRESHOLD and keyword_score > KEYWORD_BOOST_THRESHOLD:
+        base += RELEVANCE_DUAL_BOOST
 
-    # adjustment
-    if keyword > 0.6 and title_score > 0.4:
-        base += 0.05
+    if semantic_score > SEMANTIC_BOOST_THRESHOLD and title_score > TITLE_BOOST_THRESHOLD:
+        base += RELEVANCE_TITLE_BOOST
 
-    return round(min(base, 1.0), 3)
+    if keyword_score > KEYWORD_BOOST_THRESHOLD and semantic_score < SEMANTIC_WEIGHT:
+        base -= RELEVANCE_KEYWORD_PENALTY
 
+    return round(max(0.0, min(base, 1.0)), 3)
 
-# DOMAIN
 
 def compute_domain(result: SearchResult) -> float:
-
     try:
         domain = urlparse(str(result.url)).netloc.lower()
+        domain = domain.replace("www.", "")
 
-        if any(x in domain for x in ["gov", "edu", "oecd", "acm", "ieee"]):
-            return 0.95
+        if any(d in domain for d in HIGH_AUTHORITY_DOMAINS):
+            return DOMAIN_SCORE_HIGH_AUTHORITY
+        if any(d in domain for d in RESEARCH_PLATFORM_DOMAINS):
+            return DOMAIN_SCORE_RESEARCH
+        if domain.endswith(".gov") or domain.endswith(".edu"):
+            return DOMAIN_SCORE_GOV_EDU
+        if any(d in domain for d in TRUSTED_KNOWLEDGE_DOMAINS):
+            return DOMAIN_SCORE_TRUSTED
+        if any(d in domain for d in NEWS_DOMAINS):
+            return DOMAIN_SCORE_NEWS
+        if any(d in domain for d in TECH_BLOG_DOMAINS):
+            return DOMAIN_SCORE_TECH_BLOG
+        if any(d in domain for d in LOW_QUALITY_DOMAINS):
+            return DOMAIN_SCORE_LOW_QUALITY
+        if any(x in domain for x in DOMAIN_BLOG_SUBSTRINGS):
+            return DOMAIN_SCORE_BLOG_SUBDOMAIN
 
-        if any(x in domain for x in ["google", "openai", "mit", "harvard"]):
-            return 0.9
-
-        if "wikipedia" in domain:
-            return 0.8
-
-        if any(x in domain for x in ["medium", "blog"]):
-            return 0.65
-
-        return 0.7
+        return DOMAIN_SCORE_DEFAULT
 
     except:
-        return 0.5
+        return DOMAIN_SCORE_LOW_QUALITY
 
-
-# RECENCY
 
 def compute_recency(result: SearchResult, weight: float) -> float:
+    today = datetime.now()
+    days_old = None
 
-    current_year = datetime.now().year
-
-    # 1. PRIMARY: USE METADATA
+    # 1. Extract publish date
     if getattr(result, "publish_date", None):
         try:
-            year = int(str(result.publish_date)[:4])
-            gap = current_year - year
-        except:
-            gap = None
-    else:
-        gap = None
+            pub_date = result.publish_date
 
-    # 2. FALLBACK: REGEX (TEXT)
-    if gap is None:
+            if isinstance(pub_date, str):
+                pub_date = datetime.fromisoformat(pub_date[:10])
+
+            # FUTURE DATE GUARD
+            if pub_date > today:
+                days_old = 0
+            else:
+                days_old = (today - pub_date).days
+
+        except Exception:
+            days_old = None
+
+    # 2. Fallback: extract year
+    if days_old is None:
         text = f"{result.title or ''} {result.snippet or ''}"
         years = re.findall(r"(20\d{2})", text)
 
         if years:
-            latest = max(map(int, years))
-            gap = current_year - latest
+            latest_year = max(map(int, years))
+            year_diff = today.year - latest_year
 
-    # 3. DEFAULT (NO INFO)
-    if gap is None:
-        return 0.5
+            # clamp year diff
+            year_diff = max(0, min(year_diff, RECENCY_MAX_YEAR_DIFF))  # max 20 years
 
-    # 4. SCORING
-    if gap <= 1:
-        return 1.0
-    elif gap <= 2:
-        return 0.8
-    elif gap <= 3:
-        return 0.6
+            days_old = year_diff * RECENCY_DAYS_PER_YEAR
+
+    # 3. Final fallback
+    if days_old is None:
+        return 0.5  # neutral score
+
+    # 4. Clamp days_old 
+    days_old = max(0, min(days_old, RECENCY_MAX_DAYS_OLD))  # max ~10 years
+
+    # 5. Adaptive decay window
+    if weight >= RECENCY_HIGH_WEIGHT:
+        max_days = RECENCY_HIGH_DAYS
+    elif weight >= RECENCY_MED_WEIGHT:
+        max_days = RECENCY_MED_DAYS
+    elif weight >= RECENCY_LOW_WEIGHT:
+        max_days = RECENCY_LOW_DAYS
     else:
-        return 0.3
+        max_days = RECENCY_STATIC_DAYS
 
+    # 6. Compute recency
+    recency = math.exp(-days_old / max_days)
 
-# DEPTH
+    # 7. Smooth lower bound
+    recency = max(RECENCY_MIN_SCORE, recency) 
+
+    # 8. Ensure valid range
+    recency = min(max(recency, 0), 1)
+
+    return round(recency, 3)
+
 
 def compute_depth(result: SearchResult) -> float:
-
     text = result.content or result.snippet or ""
-
     wc = len(text.split())
 
-    if wc > 1200:
-        return 1.0
-    elif wc > 700:
-        return 0.75
-    elif wc > 300:
-        return 0.55
+    if wc > DEPTH_HIGH_WORDS:
+        return DEPTH_HIGH_SCORE
+    elif wc > DEPTH_MED_WORDS:
+        return DEPTH_MED_SCORE
+    elif wc > DEPTH_LOW_WORDS:
+        return DEPTH_LOW_SCORE
     else:
-        return 0.3
+        return DEPTH_MIN_SCORE
 
-
-# HARD FILTER
 
 def is_outdated(result: SearchResult, recency_weight: float) -> bool:
-
-    if recency_weight < 0.30:
+    if recency_weight < RECENCY_HIGH_WEIGHT:
         return False
 
     current_year = datetime.now().year
 
-    # 1. Try metadata
     if getattr(result, "publish_date", None):
         try:
             year = int(str(result.publish_date)[:4])
-            return (current_year - year) > 3
+            return (current_year - year) > OUTDATED_YEAR_THRESHOLD
         except:
             pass
 
-    # 2. Fallback regex
     text = f"{result.title or ''} {result.snippet or ''}"
     years = re.findall(r"(20\d{2})", text)
 
     if years:
         latest = max(map(int, years))
-        return (current_year - latest) > 3
+        return (current_year - latest) > OUTDATED_YEAR_THRESHOLD
 
     return False
 
-# MAIN
 
-def score_results(results: List[SearchResult], query: str) -> List[SearchResult]:
-
-    weights = validate_weights(get_dynamic_weights(query))
+def score_results(results: List[SearchResult], query: str, state=None) -> List[SearchResult]:
+    weights = validate_weights(get_dynamic_weights(query,state))
+    query_emb = get_embedding(query)
 
     scored = []
 
@@ -196,25 +269,34 @@ def score_results(results: List[SearchResult], query: str) -> List[SearchResult]
         if is_outdated(r, weights["recency"]):
             continue
 
-        r.relevance_score = compute_relevance(r, query)
+        r.relevance_score = compute_relevance(r, query, query_emb)
         r.domain_score = compute_domain(r)
         r.recency_score = compute_recency(r, weights["recency"])
         r.depth_score = compute_depth(r)
 
-        r.quality_score = (
-            weights["relevance"] * r.relevance_score +
+        # relevance-dominant formulation
+        # compute secondary signals
+        secondary = (
             weights["domain"] * r.domain_score +
             weights["recency"] * r.recency_score +
             weights["depth"] * r.depth_score
         )
 
-        scored.append(r)
+        # balanced scoring 
+        r.quality_score = (
+            RELEVANCE_MIX * r.relevance_score +
+            SECONDARY_MIX * secondary
+        )
 
-    # sort
+        # clamp + stability
+        r.quality_score = round(max(QUALITY_SCORE_MIN, min(r.quality_score, 1.0)), 3)
+        scored.append(r)
+        
+        print(f"[SCORING] URL={r.url} | rel={r.relevance_score:.3f} dom={r.domain_score:.3f} rec={r.recency_score:.3f} dep={r.depth_score:.3f} => quality={r.quality_score:.3f}")
+
     scored.sort(key=lambda x: x.quality_score, reverse=True)
 
-    # soft filter
-    scored = [r for r in scored if r.quality_score >= 0.25]
+    scored = [r for r in scored if r.quality_score >= QUALITY_SCORE_FILTER]
 
     for i, r in enumerate(scored):
         r.rank = i + 1
