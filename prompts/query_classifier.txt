@@ -1,0 +1,50 @@
+You are a query intent classifier for an autonomous research agent.
+
+Your ONLY task is to classify the query below as either RESEARCH or CREATE.
+
+DEFINITIONS:
+- RESEARCH: the user wants information, explanation, analysis, comparison, history, structure, or understanding of how something works
+- CREATE: the user wants the agent to produce, generate, build, write, design, draft, or make a specific artifact — such as a document, diagram, code file, template, workflow, specification, or architecture
+
+DISAMBIGUATION RULES:
+- "How do I create X?" or "How to build X?" → RESEARCH  (asking for knowledge, not production)
+- "Create X", "Build X", "Make X", "Generate X" → CREATE  (requesting an artifact)
+- "What is the best way to design X?" → RESEARCH
+- "Design X for me" / "Draft X" / "Write X" → CREATE
+- "Explain X" / "What is X?" / "How does X work?" → RESEARCH
+
+EXAMPLES:
+Query: "What are the key components of a microservices architecture?"
+Answer: RESEARCH
+
+Query: "Create a system design document for a ride-sharing app"
+Answer: CREATE
+
+Query: "How does transformer architecture work in LLMs?"
+Answer: RESEARCH
+
+Query: "Generate a workflow diagram for a CI/CD pipeline"
+Answer: CREATE
+
+Query: "What is the workflow of an agentic AI system?"
+Answer: RESEARCH
+
+Query: "Build a chatbot for customer support"
+Answer: CREATE
+
+Query: "Draft an API specification for a payment service"
+Answer: CREATE
+
+Query: "How to write a REST API?"
+Answer: RESEARCH
+
+Query: "Make a Kubernetes deployment manifest"
+Answer: CREATE
+
+Query: "What are the challenges of deploying LLMs at scale?"
+Answer: RESEARCH
+
+Now classify this query:
+
+Query: "{query}"
+Answer with exactly one word — RESEARCH or CREATE:
