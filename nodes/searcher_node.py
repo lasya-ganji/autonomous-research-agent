@@ -11,7 +11,7 @@ from models.error_models import ErrorLog
 from models.enums import SeverityEnum, ErrorTypeEnum
 
 from tools.search_tool import search_tool
-from tools.scraper_tool import scrape_url
+from tools.scraper_tool import scrape_url, is_valid_source
 
 from services.retrieval.dedup_service import (
     deduplicate_pipeline,
@@ -23,7 +23,7 @@ from utils.logger import log_node_execution
 from observability.tracing import trace_node
 from config.constants.node_constants.node_names import NodeNames
 
-from config.constants.scraper_constants import MIN_CONTENT_WORDS
+from config.constants.scraper_constants import MIN_CONTENT_WORDS, SCRAPE_MIN_RELEVANCE
 from config.constants.node_constants.search_constants import (
     MAX_SEARCH_RETRIES,
     BACKOFF_BASE,
@@ -31,6 +31,34 @@ from config.constants.node_constants.search_constants import (
     MAX_PER_DOMAIN,
     MAX_SCRAPES
 )
+
+
+# Stopwords excluded from title-query overlap to avoid false signal
+_STOPWORDS = {"the", "a", "an", "is", "are", "in", "of", "for", "and", "to", "on", "at", "with", "by"}
+
+
+def _pre_scrape_score(result, query: str) -> float:
+    """
+    Lightweight composite score computed from already-available metadata.
+    Used to rank candidates before scraping so scrape slots go to the best sources.
+
+    Signals:
+      - Tavily relevance score (0.5 weight): production ML signal, already on result
+      - Snippet word density  (0.3 weight): longer snippets predict richer page content
+      - Title-query Jaccard   (0.2 weight): topical alignment without domain lists
+    """
+    tavily_score = float(getattr(result, "relevance_score", 0.5) or 0.5)
+
+    snippet = (getattr(result, "snippet", "") or "").strip()
+    snippet_density = min(len(snippet.split()) / 60.0, 1.0)
+
+    query_terms = set(query.lower().split()) - _STOPWORDS
+    title_terms = set((getattr(result, "title", "") or "").lower().split()) - _STOPWORDS
+    union = query_terms | title_terms
+    title_overlap = len(query_terms & title_terms) / len(union) if union else 0.0
+
+    score = 0.5 * tavily_score + 0.3 * snippet_density + 0.2 * title_overlap
+    return round(min(max(score, 0.0), 1.0), 3)
 
 
 # -------------------------------
@@ -140,6 +168,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
     seen_urls = set()
     citation_counter = len(state.citations)
     step_status = {}
+    filtered_count = 0
+    snippet_fallback_count = 0
 
     try:
         if not state.research_plan:
@@ -225,6 +255,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             unique_results = []
             domain_count = {}
+            step_filtered = 0
 
             for r in deduped_results:
                 url = str(getattr(r, "url", ""))
@@ -232,6 +263,16 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     continue
 
                 norm_url = normalize_url(url)
+
+                # -------------------------------
+                # URL FILTER (pre-scrape)
+                # -------------------------------
+                if not is_valid_source(norm_url):
+                    print(f"[FILTER] Blocked URL domain={urlparse(norm_url).netloc} url={norm_url}")
+                    step_filtered += 1
+                    filtered_count += 1
+                    continue
+
                 domain = urlparse(norm_url).netloc
 
                 if domain_count.get(domain, 0) >= MAX_PER_DOMAIN:
@@ -245,11 +286,16 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                 unique_results.append((r, norm_url))
 
+            # Sort by pre-scrape score so scrape slots go to the best candidates.
+            # Sources below MAX_SCRAPES rank still enter as snippet-only — nothing is dropped.
+            unique_results.sort(key=lambda x: _pre_scrape_score(x[0], query), reverse=True)
             unique_results = unique_results[:MAX_RESULTS_PER_STEP]
 
             structured_results = []
+            step_snippet_fallbacks = 0
 
             for i, (r, norm_url) in enumerate(unique_results):
+                initial_score = _pre_scrape_score(r, query)
 
                 title = getattr(r, "title", "Untitled")
                 snippet = getattr(r, "snippet", "") or title
@@ -257,13 +303,14 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 citation_counter += 1
                 citation_id = f"[{citation_counter}]"
 
-                # URL validation
+                # -------------------------------
+                # URL VALIDATION
+                # -------------------------------
                 try:
                     status = validate_url(norm_url)
                 except Exception as e:
                     state.failure_counts["parsing_failures"] += 1
                     status = CitationStatus.broken
-
                     state.errors.append(
                         ErrorLog(
                             node="searcher_node",
@@ -274,42 +321,75 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         )
                     )
 
-                # Scraping
-                content = None
+                # -------------------------------
+                # SCRAPING + FALLBACK
+                # -------------------------------
+                # Primary: use content Tavily already extracted server-side.
+                # Tavily's crawl infrastructure bypasses 403s that our scraper hits.
+                # Own scraper runs only when Tavily returned no raw_content AND the
+                # URL's pre-scrape relevance is high enough to be worth a scrape slot.
+                # URLs below SCRAPE_MIN_RELEVANCE get snippet-only — this prevents
+                # borderline pages (e.g. local org homepages with irrelevant 13k words)
+                # from filling synthesis context with off-topic content.
+                tavily_content = getattr(r, "content", None)
+                content = tavily_content if tavily_content else None
                 publish_date = None
 
-                if i < MAX_SCRAPES:
+                if content:
+                    print(f"[TAVILY CONTENT] Using pre-fetched content url={norm_url} words={len(content.split())}")
+
+                elif i < MAX_SCRAPES and initial_score >= SCRAPE_MIN_RELEVANCE:
                     try:
                         scraped = scrape_url(norm_url)
-                        content = scraped.get("content")
-                        publish_date = scraped.get("publish_date")
+                        scrape_status = scraped.get("status", "failed")
 
-                        if not content or len(content.split()) < MIN_CONTENT_WORDS:
-                            state.failure_counts["parsing_failures"] += 1
+                        if scrape_status == "success":
+                            content = scraped.get("content")
+                            publish_date = scraped.get("publish_date")
 
+                        elif scrape_status == "low_content":
                             state.errors.append(
                                 ErrorLog(
                                     node="searcher_node",
                                     timestamp=datetime.now().isoformat(),
                                     severity=SeverityEnum.WARNING,
                                     error_type=ErrorTypeEnum.parsing_error,
-                                    message=f"No usable content: {norm_url}"
+                                    message=f"[QUALITY] Rejected low content url={norm_url} → snippet fallback"
                                 )
                             )
+                            step_snippet_fallbacks += 1
+                            snippet_fallback_count += 1
+
+                        else:
+                            # scrape_status == "failed"
+                            state.failure_counts["parsing_failures"] += 1
+                            state.errors.append(
+                                ErrorLog(
+                                    node="searcher_node",
+                                    timestamp=datetime.now().isoformat(),
+                                    severity=SeverityEnum.WARNING,
+                                    error_type=ErrorTypeEnum.system_error,
+                                    message=f"[SCRAPER ERROR] url={norm_url} error_type={scraped.get('error_type')} → snippet fallback"
+                                )
+                            )
+                            step_snippet_fallbacks += 1
+                            snippet_fallback_count += 1
 
                     except Exception as e:
                         state.failure_counts["parsing_failures"] += 1
-
                         state.errors.append(
                             ErrorLog(
                                 node="searcher_node",
                                 timestamp=datetime.now().isoformat(),
                                 severity=SeverityEnum.WARNING,
                                 error_type=ErrorTypeEnum.system_error,
-                                message=f"Scrape failed: {norm_url} | {str(e)}"
+                                message=f"[SCRAPER ERROR] url={norm_url} reason={str(e)} → snippet fallback"
                             )
                         )
+                        step_snippet_fallbacks += 1
+                        snippet_fallback_count += 1
 
+                # content=None → synthesiser falls back to snippet automatically
                 result = SearchResult(
                     citation_id=citation_id,
                     url=norm_url,
@@ -317,12 +397,12 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     snippet=snippet,
                     content=content,
                     publish_date=publish_date,
-                    quality_score=0.5,
-                    relevance_score=0.5,
+                    quality_score=initial_score,   
+                    relevance_score=initial_score,
                     recency_score=0.5,
                     domain_score=0.5,
                     depth_score=0.5,
-                    rank=1
+                    rank=i + 1
                 )
 
                 structured_results.append(result)
@@ -337,6 +417,24 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 )
 
             state.search_results[step_id] = structured_results
+
+            # step_status was set to "success" when raw_results was non-empty, but
+            # cross-step seen_url dedup or domain filtering may have removed everything.
+            # Correct to "no_content" so the evaluator sees an accurate failure signal
+            # instead of a step marked success with zero results.
+            if not structured_results and step_status.get(step_id) == "success":
+                step_status[step_id] = "no_content"
+                # Do NOT increment search_failures here — evaluator_node counts it
+                # when it sees an empty result list. Incrementing here too would
+                # double-count and prematurely trip MAX_SEARCH_FAILURES in supervisor.
+                state.unresolved_steps.append(step_id)
+                state.errors.append(ErrorLog(
+                    node="searcher_node",
+                    timestamp=datetime.now().isoformat(),
+                    severity=SeverityEnum.WARNING,
+                    error_type=ErrorTypeEnum.search_failure,
+                    message=f"Step {step_id}: all results filtered or already seen"
+                ))
 
     except Exception as e:
         state.failure_counts["search_failures"] += 1
@@ -371,6 +469,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
         "total_sources": len(state.citations),
         "search_failures": state.failure_counts["search_failures"],
         "parsing_failures": state.failure_counts["parsing_failures"],
+        "urls_filtered": filtered_count,
+        "snippet_fallbacks": snippet_fallback_count,
         "errors_count": len(state.errors)
     })
 
