@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.ERROR)
 warnings.filterwarnings("ignore")
 
 import streamlit as st
-from agent_runner import run_agent
+from agent_runner import run_agent, classify_query_intent, reframe_query
 from models.enums import CitationStatus
 
 
@@ -76,8 +76,17 @@ if run_button:
 
     start_time = time.time()
 
+    with st.spinner("Analysing query..."):
+        intent = classify_query_intent(query)
+
+    active_query = query
+    if intent == "CREATE":
+        with st.spinner("Reframing your request into a research question..."):
+            active_query = reframe_query(query)
+        st.info(f"This is a research agent — it returns cited research reports. Your request was reframed to: **\"{active_query}\"**")
+
     with st.spinner("Running research agent..."):
-        result = run_agent(query)
+        result = run_agent(active_query)
 
     total_time = round(time.time() - start_time, 2)
 
