@@ -45,6 +45,7 @@ def search_tool(query: str) -> Union[List[SearchResult], dict]:
             tavily_score = float(item.get("score", 0.0))
 
             if tavily_score < MIN_RESULT_SCORE:
+                print(f"[SCORE GATE] Dropped url={item.get('url')} score={tavily_score:.3f} (below MIN_RESULT_SCORE={MIN_RESULT_SCORE})")
                 continue
             tavily_content = (item.get("raw_content") or "").strip()[:MAX_CONTENT_CHARS * 6]
             pre_fetched_content = (

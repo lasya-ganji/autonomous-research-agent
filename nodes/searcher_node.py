@@ -29,12 +29,9 @@ from config.constants.node_constants.search_constants import (
     BACKOFF_BASE,
     MAX_RESULTS_PER_STEP,
     MAX_PER_DOMAIN,
-    MAX_SCRAPES
+    MAX_SCRAPES,
+    STOPWORDS,
 )
-
-
-# Stopwords excluded from title-query overlap to avoid false signal
-_STOPWORDS = {"the", "a", "an", "is", "are", "in", "of", "for", "and", "to", "on", "at", "with", "by"}
 
 
 def _pre_scrape_score(result, query: str) -> float:
@@ -52,8 +49,8 @@ def _pre_scrape_score(result, query: str) -> float:
     snippet = (getattr(result, "snippet", "") or "").strip()
     snippet_density = min(len(snippet.split()) / 60.0, 1.0)
 
-    query_terms = set(query.lower().split()) - _STOPWORDS
-    title_terms = set((getattr(result, "title", "") or "").lower().split()) - _STOPWORDS
+    query_terms = set(query.lower().split()) - STOPWORDS
+    title_terms = set((getattr(result, "title", "") or "").lower().split()) - STOPWORDS
     union = query_terms | title_terms
     title_overlap = len(query_terms & title_terms) / len(union) if union else 0.0
 
@@ -224,7 +221,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     state.search_results[step_id] = []
                     return state
 
-            print(f"[SEARCH] Results fetched: {len(raw_results)}")
 
             # -------------------------------
             # FAILURE CASE
@@ -291,11 +287,15 @@ def searcher_node(state: ResearchState) -> ResearchState:
             unique_results.sort(key=lambda x: _pre_scrape_score(x[0], query), reverse=True)
             unique_results = unique_results[:MAX_RESULTS_PER_STEP]
 
+            print(f"[STEP {step_id}] Candidates after filtering: {len(unique_results)}")
+
             structured_results = []
             step_snippet_fallbacks = 0
 
             for i, (r, norm_url) in enumerate(unique_results):
                 initial_score = _pre_scrape_score(r, query)
+
+                print(f"[SCORE] rank={i+1} pre_scrape={initial_score:.3f} url={norm_url}")
 
                 title = getattr(r, "title", "Untitled")
                 snippet = getattr(r, "snippet", "") or title
@@ -324,13 +324,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 # -------------------------------
                 # SCRAPING + FALLBACK
                 # -------------------------------
-                # Primary: use content Tavily already extracted server-side.
-                # Tavily's crawl infrastructure bypasses 403s that our scraper hits.
-                # Own scraper runs only when Tavily returned no raw_content AND the
-                # URL's pre-scrape relevance is high enough to be worth a scrape slot.
-                # URLs below SCRAPE_MIN_RELEVANCE get snippet-only — this prevents
-                # borderline pages (e.g. local org homepages with irrelevant 13k words)
-                # from filling synthesis context with off-topic content.
+                # Prefer Tavily server content; if unavailable and relevance is high, scrape locally. Otherwise, use snippet only.
+         
                 tavily_content = getattr(r, "content", None)
                 content = tavily_content if tavily_content else None
                 publish_date = None
@@ -339,6 +334,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     print(f"[TAVILY CONTENT] Using pre-fetched content url={norm_url} words={len(content.split())}")
 
                 elif i < MAX_SCRAPES and initial_score >= SCRAPE_MIN_RELEVANCE:
+                    print(f"[SCRAPE] Attempting local scrape url={norm_url}")
                     try:
                         scraped = scrape_url(norm_url)
                         scrape_status = scraped.get("status", "failed")
@@ -389,6 +385,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         step_snippet_fallbacks += 1
                         snippet_fallback_count += 1
 
+                else:
+                    reason = f"rank_limit (rank={i+1} > MAX_SCRAPES={MAX_SCRAPES})" if i >= MAX_SCRAPES else f"low_relevance (score={initial_score:.3f} < {SCRAPE_MIN_RELEVANCE})"
+                    print(f"[SNIPPET ONLY] url={norm_url} reason={reason}")
+
                 # content=None → synthesiser falls back to snippet automatically
                 result = SearchResult(
                     citation_id=citation_id,
@@ -418,15 +418,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             state.search_results[step_id] = structured_results
 
-            # step_status was set to "success" when raw_results was non-empty, but
-            # cross-step seen_url dedup or domain filtering may have removed everything.
-            # Correct to "no_content" so the evaluator sees an accurate failure signal
-            # instead of a step marked success with zero results.
+            # If all results were filtered out, mark step_status as "no_content" for accurate evaluation.
+     
             if not structured_results and step_status.get(step_id) == "success":
                 step_status[step_id] = "no_content"
-                # Do NOT increment search_failures here — evaluator_node counts it
-                # when it sees an empty result list. Incrementing here too would
-                # double-count and prematurely trip MAX_SEARCH_FAILURES in supervisor.
+         
                 state.unresolved_steps.append(step_id)
                 state.errors.append(ErrorLog(
                     node="searcher_node",
