@@ -1,3 +1,4 @@
+import re
 import requests
 import trafilatura
 from bs4 import BeautifulSoup
@@ -7,7 +8,9 @@ from config.constants.scraper_constants import (
     MIN_CONTENT_WORDS,
     MAX_CONTENT_CHARS,
     SCRAPE_TIMEOUT,
-    BLOCKED_DOMAINS,
+    NON_HTML_EXTENSIONS,
+    MIN_SNIPPET_WORDS,
+    UNSEARCHABLE_URL_PATTERNS,
 )
 
 HEADERS = {
@@ -20,20 +23,41 @@ HEADERS = {
 }
 
 
-def is_valid_source(url: str) -> bool:
+def is_usable_source(result) -> bool:
     """
-    Returns False for URLs that cannot produce usable text content via scraping:
-    - Blocked social/media domains (config-driven via BLOCKED_DOMAINS)
-    - PDF files (.pdf extension) — always require auth headers or return binary content
+    Signal-based pre-scrape gate. No domain names anywhere in this function.
+
+    Gate 1 — file extension: binary/non-HTML extensions never contain article text.
+              Structural, catches any URL regardless of domain.
+
+    Gate 2 — URL structural pattern: classifies content TYPE by URL shape,
+              not by domain name. /watch?v= catches any video-watch platform;
+              /status/12345 catches any microblog-post platform; etc.
+              A new platform launched tomorrow is caught if it follows the
+              same URL conventions — without adding it to any list.
+
+    Gate 3 — snippet richness: Tavily returns near-empty snippets for
+              auth-wall pages and truly empty pages (login walls, 3-8 words).
+              Safety net for patterns not yet in Gate 2.
     """
     try:
+        url = str(getattr(result, "url", "") or "")
         parsed = urlparse(url)
-        netloc = parsed.netloc.lower().removeprefix("www.")
 
-        if any(netloc == blocked or netloc.endswith("." + blocked) for blocked in BLOCKED_DOMAINS):
+        # Gate 1: binary/non-HTML file extension
+        if any(parsed.path.lower().endswith(ext) for ext in NON_HTML_EXTENSIONS):
             return False
 
-        if parsed.path.lower().endswith(".pdf"):
+        # Gate 2: URL structural pattern — content-type classification
+        # Combine path + query string so patterns like /watch?v= work correctly
+        path_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
+        for pattern in UNSEARCHABLE_URL_PATTERNS:
+            if re.search(pattern, path_and_query, re.IGNORECASE):
+                return False
+
+        # Gate 3: snippet richness — catches auth/login-wall pages not covered above
+        snippet_words = len((getattr(result, "snippet", "") or "").split())
+        if snippet_words < MIN_SNIPPET_WORDS:
             return False
 
         return True

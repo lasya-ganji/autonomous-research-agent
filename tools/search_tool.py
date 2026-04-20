@@ -5,7 +5,7 @@ import uuid
 import os
 from dotenv import load_dotenv
 from config.constants.node_constants.search_constants import TAVILY_MAX_RESULTS
-from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS, MIN_TAVILY_CONTENT_SCORE, MIN_RESULT_SCORE
+from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS, MIN_TAVILY_CONTENT_SCORE, MIN_RESULT_SCORE, SEARCH_EXCLUDE_DOMAINS
 
 def get_tavily_client():
     load_dotenv()
@@ -18,30 +18,24 @@ def get_tavily_client():
 
 
 def search_tool(query: str) -> Union[List[SearchResult], dict]:
-    print(f"[SEARCH TOOL] Query: {query}")
 
     try:
         client = get_tavily_client()
+        print(f"[SEARCH TOOL] Query: {query}")
         response = client.search(
             query=query,
             max_results=TAVILY_MAX_RESULTS,
             include_raw_content=True,
+            exclude_domains=SEARCH_EXCLUDE_DOMAINS,  # block video/social/forums at API level
         )
 
         results: List[SearchResult] = []
 
         for i, item in enumerate(response.get("results", [])):
-            # Use Tavily's server-side extracted content when available.
-            # Tavily fetches from their whitelisted IP pool, bypassing 403s that
-            # our own scraper hits. Fall back to None so searcher_node scrapes itself.
-            #
-            # Gate 0: drop results that are clearly off-topic before they enter the
-            # pipeline. Score < MIN_RESULT_SCORE (e.g. 0.09 for a retirees page)
-            # means Tavily itself rates this as a low-quality match — including it
-            # drags avg quality down without contributing useful information.
-            #
-            # Gate 1 (raw_content): Tavily relevance score >= MIN_TAVILY_CONTENT_SCORE.
-            # Gate 2 (raw_content): Char cap before word-count to prevent enormous pages.
+            # Use Tavily's extracted content if available; else let searcher_node scrape.
+            # Gate 0: Drop low-score (score < MIN_RESULT_SCORE) as off-topic.
+            # Gate 1: raw_content needs score >= MIN_TAVILY_CONTENT_SCORE.
+            # Gate 2: Char cap to avoid huge content.
             tavily_score = float(item.get("score", 0.0))
 
             if tavily_score < MIN_RESULT_SCORE:

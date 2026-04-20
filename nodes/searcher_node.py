@@ -1,3 +1,4 @@
+import re
 import time
 from datetime import datetime
 from urllib.parse import urlparse
@@ -11,7 +12,7 @@ from models.error_models import ErrorLog
 from models.enums import SeverityEnum, ErrorTypeEnum
 
 from tools.search_tool import search_tool
-from tools.scraper_tool import scrape_url, is_valid_source
+from tools.scraper_tool import scrape_url, is_usable_source
 
 from services.retrieval.dedup_service import (
     deduplicate_pipeline,
@@ -23,7 +24,10 @@ from utils.logger import log_node_execution
 from observability.tracing import trace_node
 from config.constants.node_constants.node_names import NodeNames
 
-from config.constants.scraper_constants import MIN_CONTENT_WORDS, SCRAPE_MIN_RELEVANCE
+from config.constants.scraper_constants import (
+    MIN_CONTENT_WORDS, SCRAPE_MIN_RELEVANCE, DOMAIN_FAIL_THRESHOLD,
+    NON_HTML_EXTENSIONS, MIN_SNIPPET_WORDS, UNSEARCHABLE_URL_PATTERNS,
+)
 from config.constants.node_constants.search_constants import (
     MAX_SEARCH_RETRIES,
     BACKOFF_BASE,
@@ -167,6 +171,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
     step_status = {}
     filtered_count = 0
     snippet_fallback_count = 0
+    failed_domains: dict[str, int] = {}  # runtime domain failure tracker — resets each node call
 
     try:
         if not state.research_plan:
@@ -259,26 +264,68 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     continue
 
                 norm_url = normalize_url(url)
+                snippet_text = (getattr(r, "snippet", "") or "").strip()
+                snippet_words = len(snippet_text.split())
+                snippet_preview = snippet_text[:80] + ("..." if len(snippet_text) > 80 else "")
+                parsed_path = urlparse(norm_url).path.lower()  # used by Gate 1
+
+                print(f"[CANDIDATE] url={norm_url} snippet_words={snippet_words} snippet='{snippet_preview}'")
 
                 # -------------------------------
                 # URL FILTER (pre-scrape)
                 # -------------------------------
-                if not is_valid_source(norm_url):
-                    print(f"[FILTER] Blocked URL domain={urlparse(norm_url).netloc} url={norm_url}")
+                # Gate 1: binary/non-HTML file extension
+                if any(parsed_path.endswith(ext) for ext in NON_HTML_EXTENSIONS):
+                    print(f"[FILTER:gate1:extension] DROPPED url={norm_url} reason=non-html-extension path={parsed_path}")
+                    step_filtered += 1
+                    filtered_count += 1
+                    continue
+
+                # Gate 2: URL structural pattern — content-type classification without domain names.
+                # Identifies VIDEO pages (/watch?v=), SHORT VIDEO (/shorts/), REELS (/reel/),
+                # SOCIAL POSTS (/status/12345), FORUM THREADS (/r/name/comments/).
+                # Generalises: any future platform using the same URL conventions is caught.
+                parsed = urlparse(norm_url)
+                path_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
+                matched_pattern = next(
+                    (p for p in UNSEARCHABLE_URL_PATTERNS if re.search(p, path_and_query, re.IGNORECASE)),
+                    None
+                )
+                if matched_pattern:
+                    print(f"[FILTER:gate2:url_pattern] DROPPED url={norm_url} matched_pattern='{matched_pattern}'")
+                    step_filtered += 1
+                    filtered_count += 1
+                    continue
+
+                # Gate 3: snippet richness — catches auth/login-wall pages not caught by URL patterns
+                if snippet_words < MIN_SNIPPET_WORDS:
+                    print(f"[FILTER:gate3:snippet] DROPPED url={norm_url} reason=snippet_too_short snippet_words={snippet_words} snippet='{snippet_preview}'")
                     step_filtered += 1
                     filtered_count += 1
                     continue
 
                 domain = urlparse(norm_url).netloc
 
+                # Gate 4: runtime domain failure tracker — skip domains that
+                # have already failed repeatedly in this run (auth_blocked / timeout / network)
+                domain_failures = failed_domains.get(domain, 0)
+                if domain_failures >= DOMAIN_FAIL_THRESHOLD:
+                    print(f"[FILTER:gate4:runtime] DROPPED url={norm_url} domain={domain} accumulated_failures={domain_failures}")
+                    step_filtered += 1
+                    filtered_count += 1
+                    continue
+
                 if domain_count.get(domain, 0) >= MAX_PER_DOMAIN:
+                    print(f"[FILTER:domain_cap] DROPPED url={norm_url} domain={domain} already_have={domain_count[domain]}/{MAX_PER_DOMAIN}")
                     continue
 
                 if norm_url in seen_urls:
+                    print(f"[FILTER:dedup] DROPPED url={norm_url} reason=already_seen_across_steps")
                     continue
 
                 seen_urls.add(norm_url)
                 domain_count[domain] = domain_count.get(domain, 0) + 1
+                print(f"[FILTER:PASS] ACCEPTED url={norm_url} domain={domain} snippet_words={snippet_words}")
 
                 unique_results.append((r, norm_url))
 
@@ -294,8 +341,9 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             for i, (r, norm_url) in enumerate(unique_results):
                 initial_score = _pre_scrape_score(r, query)
+                domain = urlparse(norm_url).netloc
 
-                print(f"[SCORE] rank={i+1} pre_scrape={initial_score:.3f} url={norm_url}")
+                print(f"\n[SCRAPE LOOP] rank={i+1}/{len(unique_results)} pre_scrape={initial_score:.3f} url={norm_url}")
 
                 title = getattr(r, "title", "Untitled")
                 snippet = getattr(r, "snippet", "") or title
@@ -331,10 +379,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 publish_date = None
 
                 if content:
-                    print(f"[TAVILY CONTENT] Using pre-fetched content url={norm_url} words={len(content.split())}")
+                    print(f"[CONTENT:tavily] url={norm_url} words={len(content.split())} → using Tavily pre-fetched content")
 
                 elif i < MAX_SCRAPES and initial_score >= SCRAPE_MIN_RELEVANCE:
-                    print(f"[SCRAPE] Attempting local scrape url={norm_url}")
+                    print(f"[CONTENT:scrape] url={norm_url} rank={i+1} score={initial_score:.3f} → attempting local scrape")
                     try:
                         scraped = scrape_url(norm_url)
                         scrape_status = scraped.get("status", "failed")
@@ -342,8 +390,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         if scrape_status == "success":
                             content = scraped.get("content")
                             publish_date = scraped.get("publish_date")
+                            print(f"[CONTENT:scrape:SUCCESS] url={norm_url} words={len((content or '').split())}")
 
                         elif scrape_status == "low_content":
+                            print(f"[CONTENT:scrape:LOW_CONTENT] url={norm_url} → snippet fallback (page exists but text too thin)")
                             state.errors.append(
                                 ErrorLog(
                                     node="searcher_node",
@@ -359,20 +409,29 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         else:
                             # scrape_status == "failed"
                             state.failure_counts["parsing_failures"] += 1
+                            error_type = scraped.get("error_type")
+                            print(f"[CONTENT:scrape:FAILED] url={norm_url} error_type={error_type} → snippet fallback")
                             state.errors.append(
                                 ErrorLog(
                                     node="searcher_node",
                                     timestamp=datetime.now().isoformat(),
                                     severity=SeverityEnum.WARNING,
                                     error_type=ErrorTypeEnum.system_error,
-                                    message=f"[SCRAPER ERROR] url={norm_url} error_type={scraped.get('error_type')} → snippet fallback"
+                                    message=f"[SCRAPER ERROR] url={norm_url} error_type={error_type} → snippet fallback"
                                 )
                             )
+                            # Increment domain failure counter for auth/network failures.
+                            # low_content is a page quality issue, not a domain-level block,
+                            # so it is intentionally excluded from runtime tracking.
+                            if error_type in {"auth_blocked", "timeout_error", "network_error"}:
+                                failed_domains[domain] = failed_domains.get(domain, 0) + 1
+                                print(f"[RUNTIME:domain_fail] domain={domain} total_failures={failed_domains[domain]} (threshold={DOMAIN_FAIL_THRESHOLD})")
                             step_snippet_fallbacks += 1
                             snippet_fallback_count += 1
 
                     except Exception as e:
                         state.failure_counts["parsing_failures"] += 1
+                        print(f"[CONTENT:scrape:EXCEPTION] url={norm_url} error={e} → snippet fallback")
                         state.errors.append(
                             ErrorLog(
                                 node="searcher_node",
@@ -386,8 +445,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
                         snippet_fallback_count += 1
 
                 else:
-                    reason = f"rank_limit (rank={i+1} > MAX_SCRAPES={MAX_SCRAPES})" if i >= MAX_SCRAPES else f"low_relevance (score={initial_score:.3f} < {SCRAPE_MIN_RELEVANCE})"
-                    print(f"[SNIPPET ONLY] url={norm_url} reason={reason}")
+                    if i >= MAX_SCRAPES:
+                        reason = f"rank_limit (rank={i+1} > MAX_SCRAPES={MAX_SCRAPES})"
+                    else:
+                        reason = f"low_relevance (score={initial_score:.3f} < SCRAPE_MIN_RELEVANCE={SCRAPE_MIN_RELEVANCE})"
+                    print(f"[CONTENT:snippet_only] url={norm_url} reason={reason}")
 
                 # content=None → synthesiser falls back to snippet automatically
                 result = SearchResult(
