@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 DEFAULT_WEIGHTS = {
     "relevance": 0.5,
     "recency": 0.2,
@@ -70,36 +73,82 @@ RECENCY_MAX_YEAR_DIFF = 20
 RECENCY_DAYS_PER_YEAR = 365
 RECENCY_MAX_DAYS_OLD = 3650
 
-# Domain tier scores
+# ---------------------------------------------------------------------------
+# DOMAIN TIER SCORES  (algorithm parameters — not domain names)
+# ---------------------------------------------------------------------------
 DOMAIN_SCORE_HIGH_AUTHORITY = 0.95
-DOMAIN_SCORE_RESEARCH = 0.9
-DOMAIN_SCORE_GOV_EDU = 0.93
-DOMAIN_SCORE_TRUSTED = 0.85
-DOMAIN_SCORE_NEWS = 0.8
-DOMAIN_SCORE_TECH_BLOG = 0.7
-DOMAIN_SCORE_LOW_QUALITY = 0.5
+DOMAIN_SCORE_RESEARCH       = 0.90
+DOMAIN_SCORE_GOV_EDU        = 0.93   # structural TLD fallback score
+DOMAIN_SCORE_TRUSTED        = 0.85
+DOMAIN_SCORE_NEWS           = 0.80
+DOMAIN_SCORE_TECH_BLOG      = 0.70
+DOMAIN_SCORE_LOW_QUALITY    = 0.50
 DOMAIN_SCORE_BLOG_SUBDOMAIN = 0.65
-DOMAIN_SCORE_DEFAULT = 0.75
-DOMAIN_BLOG_SUBSTRINGS = ["blog", "dev", "tech"]
+DOMAIN_SCORE_DEFAULT        = 0.75
+DOMAIN_BLOG_SUBSTRINGS      = ["blog", "dev", "tech"]
 
-# Domain lists
-HIGH_AUTHORITY_DOMAINS = [
-    "ieee.org", "acm.org", "nature.com", "sciencedirect.com",
-    "springer.com", "mit.edu", "stanford.edu", "harvard.edu",
-    "nasa.gov", "who.int", "oecd.org", "worldbank.org"
-]
-RESEARCH_PLATFORM_DOMAINS = [
-    "arxiv.org", "researchgate.net", "semanticscholar.org", "pubmed.ncbi.nlm.nih.gov"
-]
-TRUSTED_KNOWLEDGE_DOMAINS = [
-    "wikipedia.org", "britannica.com"
-]
-TECH_BLOG_DOMAINS = [
-    "medium.com", "towardsdatascience.com", "substack.com", "hashnode.dev"
-]
-NEWS_DOMAINS = [
-    "bbc.com", "nytimes.com", "reuters.com", "theguardian.com"
-]
-LOW_QUALITY_DOMAINS = [
-    "quora.com", "reddit.com", "pinterest.com"
+# ---------------------------------------------------------------------------
+# STRUCTURAL TLD PATTERNS  (domain-agnostic — catches institutions not listed)
+# ---------------------------------------------------------------------------
+# Academic TLDs used by universities and research institutes worldwide.
+# e.g. cam.ac.uk (Cambridge), ox.ac.uk (Oxford), csiro.edu.au (Australia)
+ACADEMIC_TLDS = (
+    ".edu",       # US universities
+    ".ac.uk",     # UK academic institutions
+    ".ac.jp",     # Japanese universities
+    ".ac.in",     # Indian universities
+    ".ac.nz",     # New Zealand universities
+    ".ac.za",     # South African universities
+    ".ac.kr",     # Korean universities
+    ".ac.il",     # Israeli universities
+    ".edu.au",    # Australian universities
+    ".edu.cn",    # Chinese universities
+)
+
+# Government TLDs — official public-sector sources worldwide
+GOV_TLDS = (
+    ".gov",       # US federal government
+    ".gov.uk",    # UK government
+    ".gov.au",    # Australian government
+    ".gc.ca",     # Canadian government
+    ".gov.nz",    # New Zealand government
+    ".gov.in",    # Indian government
+    ".gob.mx",    # Mexican government
+    ".gouv.fr",   # French government
+    ".gov.sg",    # Singapore government
+)
+
+# ---------------------------------------------------------------------------
+# DOMAIN LISTS  (loaded from config/domain_authority.json)
+# ---------------------------------------------------------------------------
+# Knowledge about authoritative domains lives in the JSON — not in Python code.
+# To add a new site: edit domain_authority.json and restart. No code change needed.
+_DOMAIN_AUTHORITY_PATH = Path(__file__).parent.parent / "domain_authority.json"
+try:
+    with open(_DOMAIN_AUTHORITY_PATH, encoding="utf-8") as _f:
+        _domain_data: dict = json.load(_f)
+except FileNotFoundError:
+    _domain_data = {
+        "high_authority": [], "research_platforms": [],
+        "trusted_knowledge": [], "news": [],
+        "tech_blogs": [], "low_quality": [],
+    }
+
+# Backward-compatible flat exports (used by scoring_service.py and any other consumers)
+HIGH_AUTHORITY_DOMAINS    = _domain_data.get("high_authority", [])
+RESEARCH_PLATFORM_DOMAINS = _domain_data.get("research_platforms", [])
+TRUSTED_KNOWLEDGE_DOMAINS = _domain_data.get("trusted_knowledge", [])
+NEWS_DOMAINS              = _domain_data.get("news", [])
+TECH_BLOG_DOMAINS         = _domain_data.get("tech_blogs", [])
+LOW_QUALITY_DOMAINS       = _domain_data.get("low_quality", [])
+
+# Unified tier config — ordered highest-authority first.
+# compute_domain() iterates this list so adding a new tier = one JSON entry + one dict here.
+DOMAIN_TIERS = [
+    {"name": "high_authority",    "domains": HIGH_AUTHORITY_DOMAINS,    "score": DOMAIN_SCORE_HIGH_AUTHORITY},
+    {"name": "research",          "domains": RESEARCH_PLATFORM_DOMAINS, "score": DOMAIN_SCORE_RESEARCH},
+    {"name": "trusted_knowledge", "domains": TRUSTED_KNOWLEDGE_DOMAINS, "score": DOMAIN_SCORE_TRUSTED},
+    {"name": "news",              "domains": NEWS_DOMAINS,               "score": DOMAIN_SCORE_NEWS},
+    {"name": "tech_blogs",        "domains": TECH_BLOG_DOMAINS,          "score": DOMAIN_SCORE_TECH_BLOG},
+    {"name": "low_quality",       "domains": LOW_QUALITY_DOMAINS,        "score": DOMAIN_SCORE_LOW_QUALITY},
 ]

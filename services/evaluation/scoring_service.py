@@ -34,12 +34,9 @@ from config.constants.scoring_constants import (
     RECENCY_MAX_YEAR_DIFF,
     RECENCY_DAYS_PER_YEAR,
     RECENCY_MAX_DAYS_OLD,
-    DOMAIN_SCORE_HIGH_AUTHORITY, DOMAIN_SCORE_RESEARCH, DOMAIN_SCORE_GOV_EDU,
-    DOMAIN_SCORE_TRUSTED, DOMAIN_SCORE_NEWS, DOMAIN_SCORE_TECH_BLOG,
-    DOMAIN_SCORE_LOW_QUALITY, DOMAIN_SCORE_BLOG_SUBDOMAIN, DOMAIN_SCORE_DEFAULT,
+    DOMAIN_SCORE_GOV_EDU, DOMAIN_SCORE_BLOG_SUBDOMAIN, DOMAIN_SCORE_DEFAULT,
     DOMAIN_BLOG_SUBSTRINGS,
-    HIGH_AUTHORITY_DOMAINS, RESEARCH_PLATFORM_DOMAINS, TRUSTED_KNOWLEDGE_DOMAINS,
-    TECH_BLOG_DOMAINS, NEWS_DOMAINS, LOW_QUALITY_DOMAINS
+    DOMAIN_TIERS, ACADEMIC_TLDS, GOV_TLDS,
 )
 
 def validate_weights(weights: Dict[str, float]) -> Dict[str, float]:
@@ -131,30 +128,29 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
 
 def compute_domain(result: SearchResult) -> float:
     try:
-        domain = urlparse(str(result.url)).netloc.lower()
-        domain = domain.replace("www.", "")
+        domain = urlparse(str(result.url)).netloc.lower().replace("www.", "")
 
-        if any(d in domain for d in HIGH_AUTHORITY_DOMAINS):
-            return DOMAIN_SCORE_HIGH_AUTHORITY
-        if any(d in domain for d in RESEARCH_PLATFORM_DOMAINS):
-            return DOMAIN_SCORE_RESEARCH
-        if domain.endswith(".gov") or domain.endswith(".edu"):
+        # Curated tiers from domain_authority.json — highest authority first.
+        # To add a new site: edit config/domain_authority.json, no code change needed.
+        for tier in DOMAIN_TIERS:
+            if any(d in domain for d in tier["domains"]):
+                return tier["score"]
+
+        # Structural TLD signals — catch academic/gov institutions not in any curated list.
+        # Examples: cam.ac.uk (Cambridge), ox.ac.uk (Oxford), csiro.edu.au, nih.gov, gc.ca
+        if any(domain.endswith(tld) for tld in ACADEMIC_TLDS):
             return DOMAIN_SCORE_GOV_EDU
-        if any(d in domain for d in TRUSTED_KNOWLEDGE_DOMAINS):
-            return DOMAIN_SCORE_TRUSTED
-        if any(d in domain for d in NEWS_DOMAINS):
-            return DOMAIN_SCORE_NEWS
-        if any(d in domain for d in TECH_BLOG_DOMAINS):
-            return DOMAIN_SCORE_TECH_BLOG
-        if any(d in domain for d in LOW_QUALITY_DOMAINS):
-            return DOMAIN_SCORE_LOW_QUALITY
+        if any(domain.endswith(tld) for tld in GOV_TLDS):
+            return DOMAIN_SCORE_GOV_EDU
+
+        # Subdomain heuristic: blog.*, dev.*, tech.* prefixes indicate informal content
         if any(x in domain for x in DOMAIN_BLOG_SUBSTRINGS):
             return DOMAIN_SCORE_BLOG_SUBDOMAIN
 
         return DOMAIN_SCORE_DEFAULT
 
-    except:
-        return DOMAIN_SCORE_LOW_QUALITY
+    except Exception:
+        return DOMAIN_SCORE_DEFAULT
 
 
 def compute_recency(result: SearchResult, weight: float) -> float:
