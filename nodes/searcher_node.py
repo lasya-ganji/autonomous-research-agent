@@ -17,6 +17,8 @@ from tools.search_tool import search_tool
 from tools.scraper_tool import scrape_url
 from tools.llm_tool import call_llm
 
+from services.system.cost_tracker import calculate_cost
+
 from services.retrieval.dedup_service import (
     deduplicate_pipeline,
     normalize_url
@@ -92,6 +94,10 @@ _FALLBACK_REJECT_SIGNALS = re.compile(
     r'buy now|skip to (?:main )?content',
     re.IGNORECASE,
 )
+
+
+def _zero_usage() -> dict:
+    return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost": 0.0}
 
 
 def _signal_fallback_filter(candidates: list) -> list:
@@ -183,9 +189,12 @@ def _parse_llm_decisions(raw_content: str) -> dict | None:
     }
 
 
-def _curate_sources(candidates: list, query: str) -> list:
+def _curate_sources(candidates: list, query: str) -> tuple:
     """
     Two-tier source curation — semantic filter before any scraping.
+
+    Returns (curated_list, usage_dict) where usage_dict contains token counts
+    and cost (INR) for any LLM call made during curation.
 
     Tier 0 — auto-accept (no LLM cost):
       Sources with sufficient Tavily pre-fetched content (>= MIN_CONTENT_WORDS)
@@ -202,7 +211,7 @@ def _curate_sources(candidates: list, query: str) -> list:
       Falls back to text+numeric signal filter when LLM fails.
     """
     if not candidates:
-        return candidates
+        return candidates, _zero_usage()
 
     # ── Tier 0: auto-accept Tavily-validated sources ──
     auto_accepted = []
@@ -219,12 +228,12 @@ def _curate_sources(candidates: list, query: str) -> list:
 
     if not needs_llm:
         print(f"[CURATION:SKIP] all {len(auto_accepted)} candidates auto-accepted — LLM skipped")
-        return auto_accepted
+        return auto_accepted, _zero_usage()
 
     # ── Tier 1: LLM for ambiguous candidates ──
     template = _load_curator_prompt()
     if template is None:
-        return auto_accepted + _signal_fallback_filter(needs_llm)
+        return auto_accepted + _signal_fallback_filter(needs_llm), _zero_usage()
 
     sources_payload = json.dumps([
         {
@@ -238,14 +247,27 @@ def _curate_sources(candidates: list, query: str) -> list:
 
     response = call_llm(prompt, temperature=0.0, timeout=30.0)
 
+    # Extract token usage regardless of success/failure
+    raw_usage = response.get("usage", {})
+    prompt_tokens = raw_usage.get("prompt_tokens", 0)
+    completion_tokens = raw_usage.get("completion_tokens", 0)
+    total_tokens = raw_usage.get("total_tokens", 0)
+    cost = calculate_cost(prompt_tokens, completion_tokens)
+    usage = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "cost": cost,
+    }
+
     if response.get("error"):
         err_type = response.get("error_type", "unknown_error")
         print(f"[CURATION:LLM_ERROR] type={err_type} msg={response.get('error')} — falling back")
-        return auto_accepted + _signal_fallback_filter(needs_llm)
+        return auto_accepted + _signal_fallback_filter(needs_llm), usage
 
     url_to_decision = _parse_llm_decisions(response.get("content") or "")
     if url_to_decision is None:
-        return auto_accepted + _signal_fallback_filter(needs_llm)
+        return auto_accepted + _signal_fallback_filter(needs_llm), usage
 
     # Post-LLM veto: reject UGC page_types even when the model says "accept".
     # Catches social/forum content the LLM labelled as accepted but cannot cite.
@@ -259,8 +281,8 @@ def _curate_sources(candidates: list, query: str) -> list:
             else:
                 llm_accepted.append((r, url))
 
-    print(f"[CURATION:LLM] {len(llm_accepted)}/{len(needs_llm)} ambiguous accepted")
-    return auto_accepted + llm_accepted
+    print(f"[CURATION:LLM] {len(llm_accepted)}/{len(needs_llm)} ambiguous accepted | tokens={total_tokens} cost_inr={cost}")
+    return auto_accepted + llm_accepted, usage
 
 
 # -----------------------------------------------
@@ -348,6 +370,12 @@ def searcher_node(state: ResearchState) -> ResearchState:
     filtered_count = 0
     snippet_fallback_count = 0
     per_step_metrics: dict = {}
+    curator_prompt_tokens = 0
+    curator_completion_tokens = 0
+    curator_total_tokens = 0
+    curator_cost = 0.0
+    start_tokens = state.total_tokens
+    start_cost = state.total_cost
     # Tracks per-domain scrape failures across the entire run AND across supervisor
     # re-search loops. Domains reaching DOMAIN_FAIL_THRESHOLD are excluded from
     # subsequent Tavily searches. Pulling from state so learning is not lost when
@@ -535,7 +563,11 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             pre_curation_count = len(p1.get("candidates", []))
             print(f"[STEP {step_id}] Pre-curation candidates: {pre_curation_count}")
-            unique_results = _curate_sources(p1.get("candidates", []), query)
+            unique_results, curation_usage = _curate_sources(p1.get("candidates", []), query)
+            curator_prompt_tokens += curation_usage.get("prompt_tokens", 0)
+            curator_completion_tokens += curation_usage.get("completion_tokens", 0)
+            curator_total_tokens += curation_usage.get("total_tokens", 0)
+            curator_cost += curation_usage.get("cost", 0.0)
             print(f"[STEP {step_id}] Post-curation: {len(unique_results)}/{pre_curation_count}")
 
             # Score each candidate once, then sort+slice to step budget.
@@ -733,6 +765,13 @@ def searcher_node(state: ResearchState) -> ResearchState:
     # don't rediscover the same unusable domains.
     state.failed_domains = failed_domains
 
+    # Accumulate curation LLM usage into overall state totals.
+    state.total_tokens += curator_total_tokens
+    state.total_cost = round(state.total_cost + curator_cost, 4)
+
+    node_tokens = state.total_tokens - start_tokens
+    node_cost = round(state.total_cost - start_cost, 4)
+
     existing_log = state.node_logs.get(NodeNames.SEARCHER, {})
     existing_log.update({
         "total_steps": len(state.research_plan),
@@ -747,7 +786,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
         "urls_filtered": filtered_count,
         "snippet_fallbacks": snippet_fallback_count,
         "learned_failed_domains": dict(failed_domains),
-        "errors_count": len(state.errors)
+        "errors_count": len(state.errors),
+        "node_tokens": node_tokens,
+        "node_cost": node_cost,
+        "total_cost": round(state.total_cost, 4),
     })
     state.node_logs[NodeNames.SEARCHER] = existing_log
 
