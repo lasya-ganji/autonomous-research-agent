@@ -1,16 +1,11 @@
-import re
 import requests
 import trafilatura
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
 
 from config.constants.scraper_constants import (
     MIN_CONTENT_WORDS,
     MAX_CONTENT_CHARS,
     SCRAPE_TIMEOUT,
-    NON_HTML_EXTENSIONS,
-    MIN_SNIPPET_WORDS,
-    UNSEARCHABLE_URL_PATTERNS,
 )
 
 HEADERS = {
@@ -21,48 +16,6 @@ HEADERS = {
     ),
     "Accept-Language": "en-US,en;q=0.9",
 }
-
-
-def is_usable_source(result) -> bool:
-    """
-    Signal-based pre-scrape gate. No domain names anywhere in this function.
-
-    Gate 1 — file extension: binary/non-HTML extensions never contain article text.
-              Structural, catches any URL regardless of domain.
-
-    Gate 2 — URL structural pattern: classifies content TYPE by URL shape,
-              not by domain name. /watch?v= catches any video-watch platform;
-              /status/12345 catches any microblog-post platform; etc.
-              A new platform launched tomorrow is caught if it follows the
-              same URL conventions — without adding it to any list.
-
-    Gate 3 — snippet richness: Tavily returns near-empty snippets for
-              auth-wall pages and truly empty pages (login walls, 3-8 words).
-              Safety net for patterns not yet in Gate 2.
-    """
-    try:
-        url = str(getattr(result, "url", "") or "")
-        parsed = urlparse(url)
-
-        # Gate 1: binary/non-HTML file extension
-        if any(parsed.path.lower().endswith(ext) for ext in NON_HTML_EXTENSIONS):
-            return False
-
-        # Gate 2: URL structural pattern — content-type classification
-        # Combine path + query string so patterns like /watch?v= work correctly
-        path_and_query = parsed.path + ("?" + parsed.query if parsed.query else "")
-        for pattern in UNSEARCHABLE_URL_PATTERNS:
-            if re.search(pattern, path_and_query, re.IGNORECASE):
-                return False
-
-        # Gate 3: snippet richness — catches auth/login-wall pages not covered above
-        snippet_words = len((getattr(result, "snippet", "") or "").split())
-        if snippet_words < MIN_SNIPPET_WORDS:
-            return False
-
-        return True
-    except Exception:
-        return False
 
 
 def clean_text(text: str) -> str:
@@ -83,7 +36,13 @@ def _bs4_extract(html: str) -> str:
 
 def scrape_url(url: str) -> dict:
     """
-    Fetches and extracts text content from a URL.
+    Fetches and extracts article text from a URL.
+
+    Stages:
+      1. HTTP GET — classify HTTP errors.
+      2. Content-Type check — reject non-HTML responses (PDFs, media, etc.).
+      3. Trafilatura (favor_precision=True) — reject non-article pages (None result).
+      4. BS4 fallback — only when Trafilatura returns thin content, not None.
 
     Returns:
         {
@@ -104,38 +63,49 @@ def scrape_url(url: str) -> dict:
         response = requests.get(url, headers=HEADERS, timeout=SCRAPE_TIMEOUT)
 
         if response.status_code in (401, 403):
-            print(f"[SCRAPER ERROR] url={url} status_code={response.status_code} reason=blocked")
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=blocked")
             return _failed("auth_blocked")
 
         if response.status_code == 404:
-            print(f"[SCRAPER ERROR] url={url} status_code=404 reason=not_found")
+            print(f"[SCRAPER ERROR] url={url} status=404 reason=not_found")
             return _failed("not_found")
 
         if 500 <= response.status_code < 600:
-            print(f"[SCRAPER ERROR] url={url} status_code={response.status_code} reason=server_error")
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=server_error")
             return _failed("server_error")
 
         if response.status_code != 200:
-            print(f"[SCRAPER ERROR] url={url} status_code={response.status_code} reason=http_error")
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=http_error")
             return _failed("http_error")
 
+        # Gate: reject non-HTML responses (PDFs, images, media) before parsing
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" not in content_type:
+            print(f"[SCRAPER ERROR] url={url} content_type='{content_type}' reason=non_html_content")
+            return _failed("non_html_content")
+
         html = response.text
-        extracted = trafilatura.extract(html)
+
+        # favor_precision=True makes Trafilatura treat non-article pages as None
+        # rather than extracting nav/boilerplate noise
+        extracted = trafilatura.extract(html, favor_precision=True)
         metadata = trafilatura.extract_metadata(html)
 
-        content = ""
+        if extracted is None:
+            # Trafilatura is confident this is not an article page (forum, video, profile, etc.)
+            print(f"[SCRAPER ERROR] url={url} reason=non_article (trafilatura precision reject)")
+            return _failed("non_article")
 
-        if extracted and len(extracted.split()) >= MIN_CONTENT_WORDS:
+        if len(extracted.split()) >= MIN_CONTENT_WORDS:
             content = clean_text(extracted)
-        elif extracted:
-            print(f"[SCRAPER ERROR] url={url} status_code=200 reason=low_word_count word_count={len(extracted.split())}")
-
-        if not content:
+        else:
+            # Trafilatura found partial content — try BS4 before giving up
+            print(f"[SCRAPER] url={url} trafilatura_thin={len(extracted.split())} words — BS4 fallback")
             content = _bs4_extract(html)
-
-        if not content or len(content.split()) < MIN_CONTENT_WORDS:
-            print(f"[QUALITY] Rejected low content url={url} word_count={len(content.split()) if content else 0}")
-            return _low_content()
+            if not content or len(content.split()) < MIN_CONTENT_WORDS:
+                print(f"[QUALITY] Rejected low content url={url} word_count={len(content.split()) if content else 0}")
+                return _low_content()
+            content = clean_text(content)
 
         publish_date = None
         if metadata and getattr(metadata, "date", None):

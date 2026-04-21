@@ -11,7 +11,7 @@ def get_openai_client():
     return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @traceable(name="llm_call")
-def call_llm(prompt: str, temperature: float = DEFAULT_TEMPERATURE):
+def call_llm(prompt: str, temperature: float = DEFAULT_TEMPERATURE, timeout: float = 120.0):
     try:
         client = get_openai_client()
         messages = [
@@ -37,7 +37,8 @@ If JSON is requested:
         response = client.chat.completions.create(
             model=LLM_MODEL,
             messages=messages,
-            temperature=temperature
+            temperature=temperature,
+            timeout=timeout,
         )
 
         content = response.choices[0].message.content

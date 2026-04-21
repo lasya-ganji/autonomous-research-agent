@@ -5,7 +5,7 @@ import uuid
 import os
 from dotenv import load_dotenv
 from config.constants.node_constants.search_constants import TAVILY_MAX_RESULTS
-from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS, MIN_TAVILY_CONTENT_SCORE, MIN_RESULT_SCORE, SEARCH_EXCLUDE_DOMAINS
+from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS, MIN_TAVILY_CONTENT_SCORE, MIN_RESULT_SCORE
 
 def get_tavily_client():
     load_dotenv()
@@ -17,16 +17,18 @@ def get_tavily_client():
     return TavilyClient(api_key=api_key)
 
 
-def search_tool(query: str) -> Union[List[SearchResult], dict]:
+def search_tool(query: str, exclude_domains: list = None) -> Union[List[SearchResult], dict]:
 
     try:
         client = get_tavily_client()
         print(f"[SEARCH TOOL] Query: {query}")
+        if exclude_domains:
+            print(f"[SEARCH TOOL] Excluding domains: {exclude_domains}")
         response = client.search(
             query=query,
             max_results=TAVILY_MAX_RESULTS,
             include_raw_content=True,
-            exclude_domains=SEARCH_EXCLUDE_DOMAINS,  # block video/social/forums at API level
+            exclude_domains=exclude_domains or [],
         )
 
         results: List[SearchResult] = []

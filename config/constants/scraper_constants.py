@@ -1,84 +1,78 @@
-import os
-from dotenv import load_dotenv
-
-# Load .env before any os.getenv() calls below.
-# scraper_constants is imported at module level (before setup_langsmith or
-# get_tavily_client run load_dotenv), so we must call it here to ensure
-# SEARCH_EXCLUDE_DOMAINS from .env is read correctly.
-load_dotenv()
+import re
 
 MIN_CONTENT_WORDS = 100
 MAX_CONTENT_CHARS = 5000
 SCRAPE_TIMEOUT = 8
 
+# Tavily content quality gates
 MIN_TAVILY_CONTENT_SCORE = 0.35
-
 MIN_RESULT_SCORE = 0.20
 
+# Minimum pre-scrape relevance score to qualify for local scraping
 SCRAPE_MIN_RELEVANCE = 0.40
 
-# Pre-scrape signal gate: snippets shorter than this indicate empty/login-wall pages.
+# Relevance score above which a Tavily-pre-fetched source is auto-accepted
+# without an LLM curation call. The combination of rich pre-fetched content
+# and a confident score is sufficient evidence the page is article-quality.
+CURATE_AUTO_ACCEPT_SCORE = 0.50
+
+# Snippet shorter than this indicates a login-wall or empty page
 MIN_SNIPPET_WORDS = 8
 
-# Structural gate: binary/non-HTML file extensions — never contain article text.
-NON_HTML_EXTENSIONS = {
-    ".pdf", ".mp4", ".mp3", ".avi", ".mov", ".mkv",
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
-    ".zip", ".exe", ".dmg", ".tar", ".gz",
-}
-
-# Runtime learning: skip a domain after this many scrape failures in one run.
+# Skip a domain after this many scrape failures within one run
 DOMAIN_FAIL_THRESHOLD = 2
 
-# ---------------------------------------------------------------------------
-# URL STRUCTURAL PATTERNS (content-type classification, no domain names)
-# ---------------------------------------------------------------------------
-# These patterns identify CONTENT TYPES by URL structure, not by domain name.
-# A new video platform launched tomorrow that uses /watch?v= is caught
-# automatically — without adding it to any list.
-#
-# Pattern rationale:
-#   /watch(?:[?/]|$)   → video watch page (with OR without ?v= — catches bare /watch
-#                         redirects and watch?v= links). (?:[?/]|$) ensures /watchdog
-#                         and /watchman are NOT matched (word boundary via suffix).
-#   /shorts/[id]       → short-form vertical video (YouTube Shorts-convention)
-#   /reel/[id]         → video reel (Instagram/Facebook convention)
-#   /video/\d{5,}      → video by long numeric ID (TikTok/Vimeo convention)
-#   /status/\d{8,}     → microblog post by long numeric ID (Twitter/X convention)
-#   /r/[name]/comments/ → Reddit-style hierarchical forum thread
-UNSEARCHABLE_URL_PATTERNS = [
-    r"/watch(?:[?/]|$)",              # video watch page — with or without ?v= param
-    r"/shorts/[A-Za-z0-9_\-]+",     # short-form video
-    r"/reel/[A-Za-z0-9_\-]+",       # video reel
-    r"/video/\d{5,}",                # video by long numeric ID
-    r"/status/\d{8,}",               # microblog post by long numeric ID
-    r"/r/[A-Za-z0-9_]+/comments/",  # Reddit-style forum thread
-]
+# -----------------------------------------------
+# STRUCTURAL URL FILTERS — no domain names
+# -----------------------------------------------
 
-# ---------------------------------------------------------------------------
-# SEARCH-LEVEL DOMAIN EXCLUSIONS (minimal, environment-configurable)
-# ---------------------------------------------------------------------------
-# Only for platforms where the ENTIRE domain is structurally unusable and
-# no URL pattern can detect it (auth-walled networks, image boards).
-#
-# This list is intentionally minimal — URL patterns above handle the rest.
-# Override or extend without touching code:
-#   set SEARCH_EXCLUDE_DOMAINS=linkedin.com,example.com in your .env
-#
-# youtu.be  — short YouTube links (path IS the video hash, e.g. youtu.be/abc123);
-#             no URL pattern can distinguish this from a legitimate short hash URL
-# quora.com — auth-walled Q&A (always returns 403); user-generated, non-authoritative,
-#             non-citable; snippet-only with dom=0.500 even when it slips through
-# instagram.com — photo posts at /p/ABCDEF/ have no generalizable pattern
-# linkedin.com  — entire domain is auth-walled professional network
-# facebook.com  — auth-walled social network; URL structure too varied for patterns
-# pinterest.com — image board; no article text anywhere on domain
-_exclude_defaults = (
-    "youtu.be,quora.com,instagram.com,linkedin.com,facebook.com,pinterest.com,"
-    "twitter.com,x.com,tiktok.com,snapchat.com,discord.com"
+# Binary / non-HTML file extensions.
+# These are content-format indicators — not site-specific.
+# Caught before any HTTP request or LLM call.
+BINARY_EXTENSIONS = re.compile(
+    r'\.(?:pdf|docx?|pptx?|xlsx?|odt|odp|ods|'
+    r'mp[34]|m4[av]|webm|avi|mov|mkv|flv|wmv|'
+    r'wav|flac|ogg|aac|'
+    r'zip|gz|tar|7z|rar|bz2|xz|'
+    r'exe|dmg|pkg|msi|deb|rpm|'
+    r'png|jpe?g|gif|webp|svg|ico|bmp|tiff?)'
+    r'(?:\?[^/]*)?$',
+    re.IGNORECASE,
 )
-SEARCH_EXCLUDE_DOMAINS = [
-    d.strip()
-    for d in os.getenv("SEARCH_EXCLUDE_DOMAINS", _exclude_defaults).split(",")
-    if d.strip()
-]
+
+# URL path patterns structurally associated with non-article pages.
+# All patterns are path/structure based — no domain names.
+NON_ARTICLE_URL_PATTERNS = re.compile(
+    r'(?:'
+    # Video player pages: /watch at URL end, /watch?, /watch/ID, /shorts/ID, /reels/ID
+    r'/watch(?:$|\?|/[A-Za-z0-9_-])'
+    r'|/shorts/[A-Za-z0-9_-]'
+    r'|/reel[s]?/[A-Za-z0-9_-]'
+    # Social media posts: Twitter/X Snowflake IDs are 15–19 digits
+    r'|/status/\d{15,}'
+    r')',
+    re.IGNORECASE,
+)
+
+# Hard-drop patterns for UGC / forum / thread URL structures.
+# Phase-1 Gate 2 drops these BEFORE dedup and LLM — no API cost spent on them.
+# Path-grammar only; no domain names are encoded here.
+# LLM's job is semantic assessment of what survives this gate.
+UGC_DROP_URL_PATTERNS = re.compile(
+    r'(?:'
+    # Reddit: subreddit listing or thread page
+    r'/r/[A-Za-z0-9_]{2,}/'
+    # @username author paths — Medium personal posts, Instagram, Mastodon, Bluesky
+    r'|/@[A-Za-z0-9_][A-Za-z0-9_.]{0,30}/'
+    # Numeric Q&A question pages (Stack Overflow / Quora-style IDs)
+    r'|/questions?/\d{4,}'
+    # Forum thread / topic by numeric ID (vBulletin, phpBB, Discourse)
+    r'|/threads?/\d{3,}'
+    r'|/topic[s]?/\d{3,}'
+    # Generic forum directory segment
+    r'|/forums?/'
+    # Discussion platform paths (Discourse, HN-style)
+    r'|/discuss(?:ion[s]?)?/'
+    r')',
+    re.IGNORECASE,
+)
