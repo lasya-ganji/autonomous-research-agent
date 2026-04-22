@@ -341,7 +341,7 @@ decision point. In practice, we found this brought citation counts from 8–10 d
 most runs, which felt right — those were genuinely the sources the report was grounded in.
 
 The trade-off we're less happy about is Stage 2. Capping at `MAX_SYNTHESIS_RESULTS` means
-that sometimes a relevant source ranked 6th gets cut. We don't have a great answer for
+that sometimes a relevant source ranked 13th gets cut. We don't have a great answer for
 that — in a production version we'd probably want the synthesiser to use more sources for
 context even if they don't all end up cited.
 
