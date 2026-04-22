@@ -272,20 +272,23 @@ The searcher node processes all 3 plan steps sequentially. Parallel execution us
 
 ## Challenge 1 — The Re-planning Trap
 
-**The risk:** An unanswerable question could loop forever — plan → search → low confidence → replan → repeat, burning tokens indefinitely.
+This was the first thing that worried us when we designed the evaluator. If a query has no good
+sources on the web, the agent could just keep replanning forever — spending tokens and getting
+nowhere. We needed a way to stop that without silently giving up on queries that just needed a
+better search strategy.
 
-**How our implementation prevents this:**
-
-We enforce hard numeric limits at two independent levels. In `evaluator_constants.py`:
+We ended up with two separate hard limits. In `evaluator_constants.py`:
 
 ```python
 MAX_SEARCH_RETRIES = 1
 MAX_REPLANS = 1
 ```
 
-The evaluator enforces these inside its decision logic. A retry is only issued if `search_retry_count < MAX_SEARCH_RETRIES`, and a replan is only issued if `replan_count < MAX_REPLANS`. Once both counters are exhausted, the evaluator issues `forced_proceed` — the agent proceeds to synthesis with whatever data it has rather than looping.
+The evaluator checks these before issuing any retry or replan decision. If both counters are
+exhausted, it issues `forced_proceed` — meaning the agent moves forward to synthesis with
+whatever it has, rather than looping again.
 
-The supervisor adds a second layer in `_should_finalize_partial()`:
+But we also added a second safety layer in the supervisor via `_should_finalize_partial()`:
 
 ```python
 if state.node_execution_count >= MAX_NODE_EXECUTIONS:  # 12
@@ -294,37 +297,67 @@ if state.failure_counts.get("search_failures", 0) >= MAX_SEARCH_FAILURES:  # 4
     return True
 ```
 
-This means even if the evaluator keeps producing retry decisions, the supervisor overrides and routes directly to the reporter, setting `is_partial = True`.
+The reason we have both is that the evaluator's counters only track deliberate retries and
+replans, but the execution count catches anything unexpected — like a node crashing and being
+re-entered in a way the counters don't see.
 
-**Distinguishing unanswerable vs. needs better strategy:**
-
-The evaluator computes `avg_confidence` against two thresholds: `CONFIDENCE_THRESHOLD = 0.6` and `LOW_CONFIDENCE_THRESHOLD = 0.35`. Confidence between 0.35–0.6 means results exist but are weak — signals "needs a better search strategy" and triggers a retry. Confidence below 0.35 with `all_failed = True` is a stronger signal the query is unanswerable. After `MAX_REPLANS = 1`, the planner uses `planner_replan.txt` with `failure_reason` injected as context to try a structurally different decomposition. If that also fails, `forced_proceed` fires rather than looping again.
+For distinguishing "unanswerable" from "needs a better approach" — we use two confidence
+thresholds: `CONFIDENCE_THRESHOLD = 0.6` and `LOW_CONFIDENCE_THRESHOLD = 0.35`.
+Confidence between 0.35–0.6 means the searcher found something but it was weak, which
+suggests the search strategy was wrong, not that the topic is unanswerable. That triggers a
+retry. Below 0.35 with `all_failed = True` is a much stronger signal that there's genuinely
+nothing useful out there. In that case the replanner gets `failure_reason` injected as context
+via `planner_replan.txt` to try a structurally different decomposition — but only once. After
+that, we give up and deliver whatever partial output exists. It's not a perfect heuristic but it
+works well enough for the queries we tested.
 
 ---
 
 ## Challenge 2 — Citation Truthfulness vs. Citation Coverage
 
-**The problem:** With 12 sources but only 3 high-quality, naively citing all 12 pollutes the reference list. Citing only 3 risks losing important context.
+Honestly, this one we didn't fully solve in one shot. Our first instinct was to just send all
+sources to the synthesiser and let the LLM pick the good ones — but that produced reports that
+cited Reddit threads and marketing pages alongside actual research. So we built a progressive
+filtering system with three stages.
 
-**How our implementation resolves this — 3-stage quality filter:**
+**Stage 1 — the searcher decides which sources even enter state.** Every result gets a
+`quality_score` computed as `0.7 × relevance_score + 0.3 × (domain + recency + depth)`.
+Anything below 0.25 is dropped before it's ever stored. Domain scoring is hardcoded — `.gov`,
+`.edu`, IEEE, Nature get 0.93–0.95; Reddit and Quora get 0.5. This was a pragmatic choice —
+we knew these domains behaved consistently enough to justify hard scores.
 
-**Stage 1 — Searcher (source admission):** Every scraped result is scored by `score_results()` which computes `quality_score = 0.7 × relevance_score + 0.3 × (domain + recency + depth)`. Results below `quality_score >= 0.25` are dropped before they enter the state. Domain scoring gives `.gov`/`.edu`/IEEE/Nature 0.93–0.95, Reddit/Quora 0.5.
+**Stage 2 — the synthesiser decides which sources the LLM even sees.** Before building the
+context window, it filters to `CitationStatus.valid` sources only, sorts by `quality_score`
+descending, and caps at `MAX_SYNTHESIS_RESULTS`. Sources that didn't make the cut never
+reach the LLM at all, so it can't cite them even if it wanted to.
 
-**Stage 2 — Synthesiser (context admission):** Before building the LLM context, the synthesiser filters to only `CitationStatus.valid` results, sorts by `quality_score` descending, and takes only `MAX_SYNTHESIS_RESULTS` top entries. Remaining sources are never sent to the LLM.
+**Stage 3 — the citation manager decides which citations survive per claim.** Each cited
+source is checked against the actual scraped text using embedding similarity. If the best
+chunk score for a source is ≤ 0.4, that citation is marked as hallucinated and stripped from
+the claim. If no citation survives, the claim is marked `verified = False`.
 
-**Stage 3 — Citation Manager (claim-level verification):** Each claim's `citation_ids` are verified against scraped chunks using `compute_similarity_score`. Only citations with `best_score > SIMILARITY_THRESHOLD (0.4)` survive. Citations below `VERIFICATION_THRESHOLD (0.5)` mark the claim as `verified = False`. Only sources in `used_citation_ids` appear in the final report.
+The result is that low-quality sources get dropped progressively rather than at one big
+decision point. In practice, we found this brought citation counts from 8–10 down to 3–5 in
+most runs, which felt right — those were genuinely the sources the report was grounded in.
 
-**Direct answer:** Low-quality sources are quarantined progressively — dropped by scoring, excluded from synthesis context, and stripped by the citation manager. A citation only appears in the final report if it passed all three stages. The 12 sources become 3 cited sources naturally without any explicit "cite all vs cite few" threshold.
+The trade-off we're less happy about is Stage 2. Capping at `MAX_SYNTHESIS_RESULTS` means
+that sometimes a relevant source ranked 6th gets cut. We don't have a great answer for
+that — in a production version we'd probably want the synthesiser to use more sources for
+context even if they don't all end up cited.
 
 ---
 
 ## Challenge 3 — Contradictory Sources
 
-**The problem:** Two sources make directly contradictory factual claims. Three strategies exist: flag both, pick a winner, or refuse to synthesise.
+We hit this concretely during testing — a query about online learning completion rates
+returned two sources citing different figures for the same statistic. We had three options:
+pick one, cite both and flag it, or refuse to synthesise. Refusing to synthesise felt wrong —
+that would make the agent useless for any contested topic. Picking one based on domain score
+felt dangerous — a high-ranked source can still be wrong or outdated.
 
-**How our implementation handles it:**
-
-The synthesiser explicitly models conflicts. The LLM is prompted via `synthesiser.txt` to return a `conflicts` array alongside claims, stored directly in the `SynthesisModel`:
+So we went with flagging. The synthesiser prompt (`synthesiser.txt`) explicitly asks the LLM to
+surface disagreements rather than resolve them, and the output schema has a `conflicts` array
+alongside `claims`:
 
 ```python
 conflicts = parsed.get("conflicts", [])
@@ -335,41 +368,53 @@ state.synthesis = SynthesisModel(
 )
 ```
 
-The reporter surfaces them in the report, and `node_logs["SYNTHESIS"]["conflicts"]` is tracked in the debug panel.
+A claim can carry multiple `citation_ids` so a contested statement can reference both `[3]`
+and `[7]` simultaneously. The reporter surfaces the conflict in the final output, and the debug
+panel shows `node_logs["SYNTHESIS"]["conflicts"]` for inspection.
 
-**Our chosen strategy — cite both and flag the conflict:** The synthesiser passes both sources to the LLM in the context window and the prompt instructs it to surface disagreements rather than resolve them arbitrarily. The `Claim` model supports multiple `citation_ids`, so a contested claim can cite `[3]` and `[7]` simultaneously with the conflict noted.
-
-**Failure mode analysis:**
+The failure mode we know exists: the LLM doesn't reliably detect conflicts when the
+contradictory statements are phrased differently or buried deep in long chunks. There's no
+algorithmic check — it's entirely LLM-dependent. A production version would do numerical
+claim extraction first, flag any cases where two sources give different numbers for the same
+metric, and only then pass those to the LLM for resolution. We didn't have time to build that.
 
 | Strategy | Failure Mode |
 |---|---|
-| Cite both and flag (our approach) | LLM may not reliably detect conflicts if phrased differently or spread across long chunks — no algorithmic conflict detection |
+| Cite both and flag (our approach) | LLM may not reliably detect conflicts if phrased differently or spread across long chunks |
 | Pick winner by heuristic (domain/recency score) | A high-domain-score source may be outdated; domain authority ≠ correctness |
 | Refuse to synthesise | Leaves the user with no output for contested topics |
-
-**Known gap:** A production improvement would be numerical claim extraction — detecting when two sources state different numbers for the same metric and flagging programmatically, independent of the LLM.
 
 ---
 
 ## Challenge 5 — The Cost-Quality Curve
 
-**The problem:** More searches and LLM calls improve coverage but increase cost and latency. The supervisor's node execution limit caps both.
+We picked `MAX_NODE_EXECUTIONS = 12` fairly pragmatically. The minimum viable path through
+the graph is 7 executions (supervisor → planner → searcher → evaluator → synthesiser →
+citation manager → reporter), which means 12 gives us exactly one retry/replan cycle with a
+small buffer. We didn't do extensive tuning — we chose 12, ran a few queries, and it felt like
+it never hit the limit on normal queries but did catch our infinite-loop test cases.
 
-**How the limit was tuned:**
+What happens when the limit is hit: the supervisor sets `is_partial = True` and routes
+directly to the reporter. The reporter still generates a report from whatever synthesis exists,
+but marks it `partial = True` in the output metadata. We made sure the error is explicit —
+the errors list gets a `loop_limit` entry so anyone reading the output knows why it's
+incomplete.
 
-`MAX_NODE_EXECUTIONS = 12` in `supervisor_constants.py`. This is intentionally set to allow one full retry cycle (supervisor → planner → searcher → evaluator → supervisor → synthesiser → citation manager → reporter = 7 executions minimum) while preventing runaway loops.
+There's a separate cost guardrail that's tighter than the execution limit. Every LLM-calling
+node checks `total_cost > cost_limit` after each call. If it's exceeded, `abort = True` fires
+and the supervisor routes to the reporter immediately, regardless of execution count. The
+default `cost_limit = 2.0` (INR) — in practice we've never seen a run exceed ₹0.22 even in
+worst-case retry+replan scenarios, so the limit is generous. But it's there for safety.
 
-**What happens at the boundary:** When `node_execution_count >= 12`, the supervisor sets `is_partial = True` and routes directly to the reporter. The reporter generates a report from whatever synthesis exists but marks it `partial = True` in metadata. The errors list contains a `loop_limit` entry explaining why — no silent failure.
-
-**The cost guardrail is separate and tighter:** Every node that calls the LLM checks `total_cost > cost_limit` after each call. `cost_limit = 2.0` is a default field on `ResearchState`. This fires `state.abort = True` which the supervisor checks independently of the execution count.
-
-**Could a user configure this as a quality/cost dial?**
-
-Yes — the architecture already supports it. `cost_limit` is a field on `ResearchState` with a default of `2.0`. To expose this as a user-facing dial:
+On whether this could be a user-facing dial — yes, and the architecture already supports it.
+`cost_limit` is just a field on `ResearchState` with a default value. You could expose three
+presets:
 
 ```python
 cost_limits = {"Economy": 0.5, "Balanced": 2.0, "Deep Research": 5.0}
 state = ResearchState(query=query, cost_limit=cost_limits[mode])
 ```
 
-The API surface would be three fields: `cost_limit` (float, max spend), `max_depth` (int, maps to `MAX_PLAN_STEPS`), and `quality_mode` (enum: fast / balanced / thorough). The current codebase needs only `ResearchState` to accept these as constructor arguments — no structural changes required.
+The honest answer is we didn't prioritise building that UI — the Streamlit app doesn't expose
+it. It would need a slider in the sidebar and that's about it on the frontend side. The backend
+already handles it correctly.
