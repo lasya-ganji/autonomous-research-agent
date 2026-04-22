@@ -5,6 +5,7 @@ from tools.llm_tool import call_llm
 from utils.prompt_loader import load_prompt
 from services.system.cost_tracker import calculate_cost
 from config.constants.query_constants import CREATION_VERBS, REFRAME_STRIP_PREFIXES
+from langsmith import Client
 
 
 def _extract_usage(result: dict) -> dict:
@@ -113,4 +114,8 @@ def run_agent(query: str):
          f.write(png_bytes)
         
     result = graph.invoke(state)
+    try:
+        Client().flush()
+    except Exception:
+        pass
     return result
