@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.ERROR)
 warnings.filterwarnings("ignore")
 
 import streamlit as st
-from agent_runner import run_agent
+from agent_runner import run_agent, classify_query_intent, reframe_query
 from models.enums import CitationStatus
 
 
@@ -62,7 +62,7 @@ st.set_page_config(
 st.title("Autonomous Research Agent")
 st.markdown("Generate structured, citation-backed research reports.")
 
-query = st.text_input("Research Query", placeholder="Enter your query here...")
+query = st.text_input("Research Query", placeholder="Enter your query here...", max_chars=500)
 run_button = st.button("Run Research")
 
 
@@ -74,15 +74,38 @@ if run_button:
         st.warning("Please enter a valid query.")
         st.stop()
 
+    if len(query.strip()) > 300:
+        st.warning(f"Your query is quite long ({len(query.strip())} characters). Consider shortening it to under 300 characters for more focused results.")
+
     start_time = time.time()
 
+    with st.spinner("Analysing query..."):
+        intent, intent_meta = classify_query_intent(query)
+
+    active_query = query
+    reframe_meta = None
+
+    if intent == "CREATE":
+        with st.spinner("Reframing your request into a research question..."):
+            active_query, reframe_meta = reframe_query(query)
+        st.info(f"This is a research agent — it returns cited research reports. Your request was reframed to: **{active_query}**")
+
     with st.spinner("Running research agent..."):
-        result = run_agent(query)
+        result = run_agent(active_query)
 
     total_time = round(time.time() - start_time, 2)
 
     if hasattr(result, "dict"):
         result = result.dict()
+
+    pre_tokens = intent_meta.get("total_tokens", 0)
+    pre_cost = intent_meta.get("cost", 0.0)
+    if reframe_meta:
+        pre_tokens += reframe_meta.get("total_tokens", 0)
+        pre_cost += reframe_meta.get("cost", 0.0)
+
+    combined_tokens = result.get("total_tokens", 0) + pre_tokens
+    combined_cost = round(result.get("total_cost", 0) + pre_cost, 4)
 
     st.success(f"Research completed in {total_time}s")
 
@@ -249,6 +272,30 @@ if run_button:
 
     # ---------------- DEBUG / COST / ERRORS ----------------
     with tab7:
+        st.subheader("Pre-Pipeline")
+
+        with st.expander("INTENT CLASSIFICATION"):
+            st.json({
+                "intent": intent_meta.get("intent", "RESEARCH"),
+                "prompt_tokens": intent_meta.get("prompt_tokens", 0),
+                "completion_tokens": intent_meta.get("completion_tokens", 0),
+                "total_tokens": intent_meta.get("total_tokens", 0),
+                "cost_inr": intent_meta.get("cost", 0.0),
+                "fallback": intent_meta.get("fallback", False),
+            })
+
+        if reframe_meta:
+            with st.expander("QUERY REFRAMER"):
+                st.json({
+                    "reframed_query": reframe_meta.get("reframed_query", active_query),
+                    "prompt_tokens": reframe_meta.get("prompt_tokens", 0),
+                    "completion_tokens": reframe_meta.get("completion_tokens", 0),
+                    "total_tokens": reframe_meta.get("total_tokens", 0),
+                    "cost_inr": reframe_meta.get("cost", 0.0),
+                    "fallback": reframe_meta.get("fallback", False),
+                })
+
+        st.divider()
         st.subheader("Node Execution Details")
 
         if node_logs:
@@ -273,8 +320,8 @@ if run_button:
         st.divider()
 
         st.subheader("Execution Metrics")
-        st.write(f"Total Tokens: {result.get('total_tokens', 0)}")
-        st.write(f"Total Cost (₹): {round(result.get('total_cost', 0), 4)}")
+        st.write(f"Total Tokens: {combined_tokens}")
+        st.write(f"Total Cost (₹): {combined_cost}")
         
         st.write(f"Final Node Execution Count: {result.get('node_execution_count', 0)}")
 

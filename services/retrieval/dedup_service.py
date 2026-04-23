@@ -150,14 +150,14 @@ def semantic_dedup(results, top_k=TOP_K_SEMANTIC, threshold=SEMANTIC_DUP_THRESHO
             sim = cosine_similarity(embeddings[i], embeddings[j])
 
             if sim > threshold:
-                qi = getattr(top_results[i], "quality_score", 0.5)
-                qj = getattr(top_results[j], "quality_score", 0.5)
+                # Use Tavily relevance_score as the tie-breaking signal at dedup time —
+                # quality_score is still the neutral default (0.5) here since the
+                # evaluator has not run yet. relevance_score carries the actual Tavily
+                # ML score set by search_tool.
+                qi = getattr(top_results[i], "relevance_score", None) or getattr(top_results[i], "quality_score", 0.5)
+                qj = getattr(top_results[j], "relevance_score", None) or getattr(top_results[j], "quality_score", 0.5)
 
-                # Condition 1: similarity is high
-                # Condition 2: quality scores are close (avoid removing unique useful docs)
                 quality_close = abs(qi - qj) < QUALITY_DIFF_THRESHOLD
-
-                # Condition 3: both are high-quality → likely duplicate
                 both_high_quality = qi > MIN_QUALITY_FOR_DEDUP and qj > MIN_QUALITY_FOR_DEDUP
 
                 if quality_close or both_high_quality:

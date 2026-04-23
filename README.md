@@ -162,6 +162,11 @@ pytest tests/ -v -s
 
 **Total: 41 tests across 8 files**
 
+### pytest output
+
+![pytest output part 1](tests_passing_1.png)
+![pytest output part 2](tests_passing_2.png)
+
 ---
 
 ## Notes

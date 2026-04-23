@@ -51,6 +51,10 @@ class ResearchState(BaseModel):
         "citation_failures": 0,
     })
 
+    # Runtime-learned domain failures for Tavily exclude_domains.
+    # Persisted so learning survives supervisor re-search loops.
+    failed_domains: Dict[str, int] = Field(default_factory=dict)
+
     is_partial: bool = False
 
     # ERRORS

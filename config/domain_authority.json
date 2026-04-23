@@ -1,0 +1,49 @@
+{
+  "_comment": "Domain authority tiers for source scoring. Edit this file to add/remove domains without touching Python code. Tiers are checked in order: high_authority first, low_quality last.",
+
+  "high_authority": [
+    "ieee.org", "acm.org", "nature.com", "sciencedirect.com", "springer.com",
+    "mit.edu", "stanford.edu", "harvard.edu", "caltech.edu", "cmu.edu",
+    "nasa.gov", "who.int", "oecd.org", "worldbank.org", "imf.org",
+    "un.org", "unicef.org", "europa.eu",
+    "elsevier.com", "wiley.com", "tandfonline.com", "cambridge.org",
+    "jstor.org", "pnas.org", "science.org", "cell.com",
+    "thelancet.com", "bmj.com", "nejm.org",
+    "acs.org", "rsc.org", "aps.org", "iop.org", "plos.org",
+    "nber.org", "rand.org", "brookings.edu", "pewresearch.org"
+  ],
+
+  "research_platforms": [
+    "arxiv.org", "researchgate.net", "semanticscholar.org",
+    "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov",
+    "ssrn.com", "biorxiv.org", "medrxiv.org",
+    "zenodo.org", "figshare.com", "osf.io",
+    "core.ac.uk", "eric.ed.gov", "psycnet.apa.org",
+    "dl.acm.org", "ieeexplore.ieee.org"
+  ],
+
+  "trusted_knowledge": [
+    "wikipedia.org", "britannica.com",
+    "scholarpedia.org", "wolframalpha.com"
+  ],
+
+  "news": [
+    "bbc.com", "reuters.com", "apnews.com",
+    "nytimes.com", "theguardian.com", "washingtonpost.com",
+    "bloomberg.com", "wsj.com", "ft.com",
+    "economist.com", "theatlantic.com", "foreignpolicy.com",
+    "npr.org", "pbs.org", "politico.com",
+    "wired.com", "arstechnica.com", "technologyreview.com",
+    "statista.com", "sciencedaily.com", "phys.org"
+  ],
+
+  "tech_blogs": [
+    "medium.com", "towardsdatascience.com", "substack.com", "hashnode.dev",
+    "dev.to", "infoq.com", "dzone.com", "thenewstack.io",
+    "css-tricks.com", "smashingmagazine.com", "hackernoon.com"
+  ],
+
+  "low_quality": [
+    "reddit.com", "answers.com", "ask.com", "ehow.com", "wikihow.com"
+  ]
+}

@@ -1,7 +1,12 @@
 import requests
 import trafilatura
 from bs4 import BeautifulSoup
-from config.constants.scraper_constants import MIN_CONTENT_WORDS, MAX_CONTENT_CHARS, SCRAPE_TIMEOUT
+
+from config.constants.scraper_constants import (
+    MIN_CONTENT_WORDS,
+    MAX_CONTENT_CHARS,
+    SCRAPE_TIMEOUT,
+)
 
 HEADERS = {
     "User-Agent": (
@@ -16,106 +21,111 @@ HEADERS = {
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    text = " ".join(text.split())
-    return text[:MAX_CONTENT_CHARS]
+    return " ".join(text.split())[:MAX_CONTENT_CHARS]
 
 
-def fallback_bs4(html: str) -> str:
+def _bs4_extract(html: str) -> str:
     try:
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
             tag.decompose()
-        text = soup.get_text(separator=" ")
-        return clean_text(text)
-    except Exception as e:
-        print(f"[BS4 FALLBACK ERROR] {e}")
+        return clean_text(soup.get_text(separator=" "))
+    except Exception:
         return ""
 
 
 def scrape_url(url: str) -> dict:
     """
-    Scrape webpage content and metadata
+    Fetches and extracts article text from a URL.
+
+    Stages:
+      1. HTTP GET — classify HTTP errors.
+      2. Content-Type check — reject non-HTML responses (PDFs, media, etc.).
+      3. Trafilatura (favor_precision=True) — reject non-article pages (None result).
+      4. BS4 fallback — only when Trafilatura returns thin content, not None.
 
     Returns:
-    {
-        "content": str,
-        "publish_date": str | None,
-        "error_type": str | None   
-    }
+        {
+            "status":       "success" | "failed" | "low_content",
+            "content":      str,
+            "publish_date": str | None,
+            "error_type":   str | None,
+        }
     """
+
+    def _failed(error_type: str) -> dict:
+        return {"status": "failed", "content": "", "publish_date": None, "error_type": error_type}
+
+    def _low_content() -> dict:
+        return {"status": "low_content", "content": "", "publish_date": None, "error_type": "content_unusable"}
 
     try:
         response = requests.get(url, headers=HEADERS, timeout=SCRAPE_TIMEOUT)
 
-        # -------------------------------
-        # HTTP ERROR CLASSIFICATION
-        # -------------------------------
+        if response.status_code in (401, 403):
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=blocked")
+            return _failed("auth_blocked")
+
+        if response.status_code == 404:
+            print(f"[SCRAPER ERROR] url={url} status=404 reason=not_found")
+            return _failed("not_found")
+
+        if 500 <= response.status_code < 600:
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=server_error")
+            return _failed("server_error")
+
         if response.status_code != 200:
-            print(f"[SCRAPER WARNING] Non-200 response: {url} | status={response.status_code}")
+            print(f"[SCRAPER ERROR] url={url} status={response.status_code} reason=http_error")
+            return _failed("http_error")
 
-            if response.status_code == 401 or response.status_code == 403:
-                error_type = "auth_error"
-            elif response.status_code == 404:
-                error_type = "not_found"
-            elif 500 <= response.status_code < 600:
-                error_type = "server_error"
-            else:
-                error_type = "http_error"
-
-            return {"content": "", "publish_date": None, "error_type": error_type}
+        # Gate: reject non-HTML responses (PDFs, images, media) before parsing
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" not in content_type:
+            print(f"[SCRAPER ERROR] url={url} content_type='{content_type}' reason=non_html_content")
+            return _failed("non_html_content")
 
         html = response.text
 
-        extracted = trafilatura.extract(html)
+        # favor_precision=True makes Trafilatura treat non-article pages as None
+        # rather than extracting nav/boilerplate noise
+        extracted = trafilatura.extract(html, favor_precision=True)
         metadata = trafilatura.extract_metadata(html)
 
-        if not extracted:
-            print(f"[SCRAPER DEBUG] Trafilatura returned empty: {url}")
+        if extracted is None:
+            # Trafilatura is confident this is not an article page (forum, video, profile, etc.)
+            print(f"[SCRAPER ERROR] url={url} reason=non_article (trafilatura precision reject)")
+            return _failed("non_article")
 
-        content = ""
+        if len(extracted.split()) >= MIN_CONTENT_WORDS:
+            content = clean_text(extracted)
+        else:
+            # Trafilatura found partial content — try BS4 before giving up
+            print(f"[SCRAPER] url={url} trafilatura_thin={len(extracted.split())} words — BS4 fallback")
+            content = _bs4_extract(html)
+            if not content or len(content.split()) < MIN_CONTENT_WORDS:
+                print(f"[QUALITY] Rejected low content url={url} word_count={len(content.split()) if content else 0}")
+                return _low_content()
+            content = clean_text(content)
 
-        if extracted:
-            word_count = len(extracted.split())
-            if word_count >= MIN_CONTENT_WORDS:
-                content = clean_text(extracted)
-            else:
-                print(f"[SCRAPER DEBUG] Low word count ({word_count}) → fallback: {url}")
-
-        if not content:
-            print(f"[SCRAPER FALLBACK] Using BS4 for: {url}")
-            content = fallback_bs4(html)
-
-        # -------------------------------
-        # FINAL VALIDATION
-        # -------------------------------
-        if not content or len(content.split()) < MIN_CONTENT_WORDS:
-            print(f"[SCRAPER ERROR] No usable content: {url}")
-            return {"content": "", "publish_date": None, "error_type": "content_unusable"}  
-
-        # -------------------------------
-        # METADATA
-        # -------------------------------
         publish_date = None
         if metadata and getattr(metadata, "date", None):
             publish_date = metadata.date
 
         return {
+            "status": "success",
             "content": content,
             "publish_date": publish_date,
-            "error_type": None  
+            "error_type": None,
         }
 
-    # -------------------------------
-    #  NETWORK / TIMEOUT HANDLING
-    # -------------------------------
     except requests.exceptions.Timeout:
-        print(f"[SCRAPER ERROR] Timeout: {url}")
-        return {"content": "", "publish_date": None, "error_type": "timeout_error"}
+        print(f"[SCRAPER ERROR] url={url} reason=timeout")
+        return _failed("timeout_error")
 
     except requests.exceptions.ConnectionError:
-        print(f"[SCRAPER ERROR] Connection failed: {url}")
-        return {"content": "", "publish_date": None, "error_type": "network_error"}
+        print(f"[SCRAPER ERROR] url={url} reason=connection_failed")
+        return _failed("network_error")
 
     except Exception as e:
-        print(f"[SCRAPER ERROR] URL: {url} | ERROR: {e}")
-        return {"content": "", "publish_date": None, "error_type": "unknown_error"}
+        print(f"[SCRAPER ERROR] url={url} reason={e}")
+        return _failed("unknown_error")
