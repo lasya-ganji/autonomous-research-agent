@@ -73,12 +73,10 @@ RECENCY_MAX_YEAR_DIFF = 20
 RECENCY_DAYS_PER_YEAR = 365
 RECENCY_MAX_DAYS_OLD = 3650
 
-# ---------------------------------------------------------------------------
-# DOMAIN TIER SCORES  (algorithm parameters — not domain names)
-# ---------------------------------------------------------------------------
+# DOMAIN TIER SCORES 
 DOMAIN_SCORE_HIGH_AUTHORITY = 0.95
 DOMAIN_SCORE_RESEARCH       = 0.90
-DOMAIN_SCORE_GOV_EDU        = 0.93   # structural TLD fallback score
+DOMAIN_SCORE_GOV_EDU        = 0.93  
 DOMAIN_SCORE_TRUSTED        = 0.85
 DOMAIN_SCORE_NEWS           = 0.80
 DOMAIN_SCORE_TECH_BLOG      = 0.70
@@ -87,11 +85,8 @@ DOMAIN_SCORE_BLOG_SUBDOMAIN = 0.65
 DOMAIN_SCORE_DEFAULT        = 0.75
 DOMAIN_BLOG_SUBSTRINGS      = ["blog", "dev", "tech"]
 
-# ---------------------------------------------------------------------------
-# STRUCTURAL TLD PATTERNS  (domain-agnostic — catches institutions not listed)
-# ---------------------------------------------------------------------------
+
 # Academic TLDs used by universities and research institutes worldwide.
-# e.g. cam.ac.uk (Cambridge), ox.ac.uk (Oxford), csiro.edu.au (Australia)
 ACADEMIC_TLDS = (
     ".edu",       # US universities
     ".ac.uk",     # UK academic institutions
@@ -118,10 +113,7 @@ GOV_TLDS = (
     ".gov.sg",    # Singapore government
 )
 
-# ---------------------------------------------------------------------------
-# DOMAIN LISTS  (loaded from config/domain_authority.json)
-# ---------------------------------------------------------------------------
-# Knowledge about authoritative domains lives in the JSON — not in Python code.
+
 # To add a new site: edit domain_authority.json and restart. No code change needed.
 _DOMAIN_AUTHORITY_PATH = Path(__file__).parent.parent / "domain_authority.json"
 try:
@@ -142,7 +134,6 @@ NEWS_DOMAINS              = _domain_data.get("news", [])
 TECH_BLOG_DOMAINS         = _domain_data.get("tech_blogs", [])
 LOW_QUALITY_DOMAINS       = _domain_data.get("low_quality", [])
 
-# Unified tier config — ordered highest-authority first.
 # compute_domain() iterates this list so adding a new tier = one JSON entry + one dict here.
 DOMAIN_TIERS = [
     {"name": "high_authority",    "domains": HIGH_AUTHORITY_DOMAINS,    "score": DOMAIN_SCORE_HIGH_AUTHORITY},

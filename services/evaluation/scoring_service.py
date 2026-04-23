@@ -69,9 +69,7 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
     query_terms = query.split()
     doc_terms = doc_text.split()
 
-    # -------------------------------
     # KEYWORD SCORE 
-    # -------------------------------
     doc_tf = Counter(doc_terms)
 
     keyword_score = 0.0
@@ -81,9 +79,7 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
 
     keyword_score = keyword_score / max(len(query_terms), 1)
 
-    # -------------------------------
     # SEMANTIC SCORE
-    # -------------------------------
     if query_emb is None:
         query_emb = get_embedding(query)
 
@@ -100,9 +96,7 @@ def compute_relevance(result: SearchResult, query: str, query_emb=None) -> float
     else:
         semantic_score = 0.0
 
-    # -------------------------------
     # TITLE SCORE
-    # -------------------------------
     title_words = set(title.lower().split())
     query_words = set(query_terms)
 
@@ -131,13 +125,11 @@ def compute_domain(result: SearchResult) -> float:
         domain = urlparse(str(result.url)).netloc.lower().replace("www.", "")
 
         # Curated tiers from domain_authority.json — highest authority first.
-        # To add a new site: edit config/domain_authority.json, no code change needed.
         for tier in DOMAIN_TIERS:
             if any(d in domain for d in tier["domains"]):
                 return tier["score"]
 
         # Structural TLD signals — catch academic/gov institutions not in any curated list.
-        # Examples: cam.ac.uk (Cambridge), ox.ac.uk (Oxford), csiro.edu.au, nih.gov, gc.ca
         if any(domain.endswith(tld) for tld in ACADEMIC_TLDS):
             return DOMAIN_SCORE_GOV_EDU
         if any(domain.endswith(tld) for tld in GOV_TLDS):
@@ -270,7 +262,6 @@ def score_results(results: List[SearchResult], query: str, state=None) -> List[S
         r.recency_score = compute_recency(r, weights["recency"])
         r.depth_score = compute_depth(r)
 
-        # relevance-dominant formulation
         # compute secondary signals
         secondary = (
             weights["domain"] * r.domain_score +

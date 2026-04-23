@@ -40,17 +40,13 @@ def text_overlap(a: str, b: str) -> float:
 def synthesiser_node(state: ResearchState) -> ResearchState:
 
     try:
-        # -------------------------------
         # SAFETY INIT
-        # -------------------------------
         if state.errors is None:
             state.errors = []
         if state.node_logs is None:
             state.node_logs = {}
 
-        # -------------------------------
         # FILTER VALID RESULTS
-        # -------------------------------
         valid_results = []
         for results in state.search_results.values():
             for r in results:
@@ -73,18 +69,14 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-        # -------------------------------
         # SELECT TOP RESULTS
-        # -------------------------------
         valid_results = sorted(
             valid_results,
             key=lambda x: getattr(x, "quality_score", 0),
             reverse=True
         )[:MAX_SYNTHESIS_RESULTS]
 
-        # -------------------------------
         # BUILD CONTEXT
-        # -------------------------------
         context_docs = []
         doc_chunks = []
         state.citation_chunks = {}
@@ -139,9 +131,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         print(f"[SYNTHESIS] Context docs built: {len(context_docs)}")
 
-        # -------------------------------
         # LLM CALL
-        # -------------------------------
         prompt = (
             load_prompt("synthesiser.txt")
             .replace("{query}", state.query)
@@ -150,9 +140,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
         res = call_llm(prompt=prompt, temperature=SYNTHESISER_TEMPERATURE)
 
-        # -------------------------------
         # HANDLE LLM ERRORS
-        # -------------------------------
         if isinstance(res, dict) and res.get("error"):
             raw_type = res.get("error_type", "unknown_error")
 
@@ -187,9 +175,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
         response_content = res.get("content", "") or ""
         usage = res.get("usage", {}) or {}
 
-        # -------------------------------
         # EMPTY RESPONSE GUARD
-        # -------------------------------
         if not response_content.strip():
             state.errors.append(
                 ErrorLog(
@@ -205,9 +191,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             state.synthesis = SynthesisModel(claims=[], conflicts=[], partial=True)
             return state
 
-        # -------------------------------
         # COST TRACKING
-        # -------------------------------
         node_tokens = usage.get("total_tokens", 0)
         node_cost = calculate_cost(
             usage.get("prompt_tokens", 0),
@@ -230,9 +214,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             )
             return state
 
-        # -------------------------------
         # PARSE RESPONSE (ROBUST)
-        # -------------------------------
         try:
             parsed = json.loads(response_content)
         except Exception:
@@ -252,9 +234,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                 )
                 parsed = {}
 
-        # -------------------------------
         # CLAIM PROCESSING
-        # -------------------------------
         valid_ids_set = {
             cid for cid, c in state.citations.items()
             if c.status == CitationStatus.valid
@@ -333,9 +313,7 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
             partial=partial_flag,
         )
 
-        # -------------------------------
         # LOGGING
-        # -------------------------------
         existing_log = state.node_logs.get(NodeNames.SYNTHESIS, {})
         existing_log.update({
             "num_claims": len(claims),

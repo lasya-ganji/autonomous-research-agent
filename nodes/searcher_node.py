@@ -44,9 +44,7 @@ from config.constants.node_constants.search_constants import (
 )
 
 
-# -----------------------------------------------
 # PRE-SCRAPE RANKING
-# -----------------------------------------------
 def _pre_scrape_score(result, query: str) -> float:
     """
     Lightweight composite score from already-available metadata.
@@ -71,10 +69,7 @@ def _pre_scrape_score(result, query: str) -> float:
     return round(min(max(score, 0.0), 1.0), 3)
 
 
-# -----------------------------------------------
 # LLM SOURCE CURATION — THREE-TIER FALLBACK
-# -----------------------------------------------
-
 # LLM page_type values that represent UGC/social/forum content.
 # Used as a post-LLM veto: even if the LLM says "accept", these types are
 # rejected because they are not citable in a research document.
@@ -84,9 +79,6 @@ _UGC_PAGE_TYPES = frozenset({
 })
 
 # Observable snippet text patterns that definitively indicate non-research content.
-# These specific phrases do not appear in research articles — only in login walls,
-# paywalls, marketing pages, and navigation-only pages.
-# Domain-agnostic: detects content type from language, not from site names.
 _FALLBACK_REJECT_SIGNALS = re.compile(
     r'sign in to continue|please log in|subscribe to access|'
     r'create an account to|members only|log in to view|'
@@ -213,7 +205,7 @@ def _curate_sources(candidates: list, query: str) -> tuple:
     if not candidates:
         return candidates, _zero_usage()
 
-    # ── Tier 0: auto-accept Tavily-validated sources ──
+    # Tier 0: auto-accept Tavily-validated sources
     auto_accepted = []
     needs_llm = []
     for r, url in candidates:
@@ -230,7 +222,7 @@ def _curate_sources(candidates: list, query: str) -> tuple:
         print(f"[CURATION:SKIP] all {len(auto_accepted)} candidates auto-accepted — LLM skipped")
         return auto_accepted, _zero_usage()
 
-    # ── Tier 1: LLM for ambiguous candidates ──
+    # Tier 1: LLM for ambiguous candidates
     template = _load_curator_prompt()
     if template is None:
         return auto_accepted + _signal_fallback_filter(needs_llm), _zero_usage()
@@ -270,7 +262,6 @@ def _curate_sources(candidates: list, query: str) -> tuple:
         return auto_accepted + _signal_fallback_filter(needs_llm), usage
 
     # Post-LLM veto: reject UGC page_types even when the model says "accept".
-    # Catches social/forum content the LLM labelled as accepted but cannot cite.
     llm_accepted = []
     for r, url in needs_llm:
         entry = url_to_decision.get(url, {"decision": "accept", "page_type": "other"})
@@ -285,9 +276,7 @@ def _curate_sources(candidates: list, query: str) -> tuple:
     return auto_accepted + llm_accepted, usage
 
 
-# -----------------------------------------------
 # SEARCH WITH RETRY
-# -----------------------------------------------
 def _search_with_retry(query: str, state: ResearchState, exclude_domains: list = None):
     """
     Performs a Tavily search with retry + exponential backoff.
@@ -351,9 +340,7 @@ def _search_with_retry(query: str, state: ResearchState, exclude_domains: list =
     return []
 
 
-# -----------------------------------------------
 # MAIN SEARCHER NODE
-# -----------------------------------------------
 @trace_node(NodeNames.SEARCHER)
 def searcher_node(state: ResearchState) -> ResearchState:
 
@@ -376,10 +363,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
     curator_cost = 0.0
     start_tokens = state.total_tokens
     start_cost = state.total_cost
+    
     # Tracks per-domain scrape failures across the entire run AND across supervisor
-    # re-search loops. Domains reaching DOMAIN_FAIL_THRESHOLD are excluded from
-    # subsequent Tavily searches. Pulling from state so learning is not lost when
-    # the supervisor re-invokes the searcher.
     failed_domains: dict[str, int] = dict(getattr(state, "failed_domains", {}) or {})
 
     try:
@@ -397,13 +382,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
         steps = sorted(state.research_plan, key=lambda x: x.priority)
 
-        # ═══════════════════════════════════════════════════════════════
         # PHASE 1 — Search + structural filter + dedup + snippet gates
-        # Collects filtered candidates for every step WITHOUT calling the
-        # LLM yet, so Phase 2 can batch all steps into a single LLM call.
-        # ═══════════════════════════════════════════════════════════════
-        # Per-step state accumulated during Phase 1, consumed in Phase 3.
-        phase1: dict = {}  # step_id → {query, candidates, raw_len, pre_filtered_len, deduped_len, step_filtered}
+        phase1: dict = {}  
 
         for step in steps:
             if getattr(state, "api_failure", False):
@@ -421,7 +401,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             if learned_exclusions:
                 print(f"[SEARCH] Excluding {len(learned_exclusions)} failed domains from this step")
 
-            # ── Primary search ──
+            # Primary search 
             raw_results = _search_with_retry(query, state, exclude_domains=learned_exclusions)
 
             if getattr(state, "api_failure", False):
@@ -429,7 +409,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 state.search_results[step_id] = []
                 return state
 
-            # ── Fallback search (shortened query) ──
+            # Fallback search (shortened query)
             if not raw_results and not getattr(state, "api_failure", False):
                 fallback_query = " ".join(query.split()[:6])
                 print(f"[SEARCH RETRY] Fallback query: {fallback_query}")
@@ -456,9 +436,8 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
             step_status[step_id] = "success"
 
-            # ── Stage A: Structural pre-filter ──
+            # Stage A: Structural pre-filter
             # Binary files, video player paths, social post IDs → dropped before
-            # the embedding-based dedup to avoid wasting embedding API calls.
             step_filtered = 0
             pre_filtered = []
             for r in raw_results:
@@ -483,10 +462,10 @@ def searcher_node(state: ResearchState) -> ResearchState:
                     continue
                 pre_filtered.append(r)
 
-            # ── Stage B: Deduplication (URL → heuristic → semantic) ──
+            # Stage B: Deduplication (URL → heuristic → semantic) 
             deduped_results = deduplicate_pipeline(pre_filtered)
 
-            # ── Stage C: Snippet quality + domain caps + cross-step dedup ──
+            # Stage C: Snippet quality + domain caps + cross-step dedup
             unique_results = []
             domain_count: dict = {}
 
@@ -501,8 +480,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
 
                 print(f"[CANDIDATE] url={norm_url} snippet_words={snippet_words} snippet='{snippet_preview}'")
 
-                # Gate 3: snippet richness. Exception: thin snippet OK if Tavily
-                # already fetched substantive raw content for this URL.
                 if snippet_words < MIN_SNIPPET_WORDS:
                     tavily_content = getattr(r, "content", None) or ""
                     if len(tavily_content.split()) < MIN_CONTENT_WORDS:
@@ -544,11 +521,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             }
             print(f"[STEP {step_id}] Phase-1 candidates (pre-curation): {len(unique_results)}")
 
-        # ═══════════════════════════════════════════════════════════════
         # PHASE 2 — Per-step LLM curation + scrape
-        # Curation uses Tier 0 (auto-accept Tavily-rich sources) so most
-        # steps only pay LLM cost for the small ambiguous remainder.
-        # ═══════════════════════════════════════════════════════════════
         for step in steps:
             if getattr(state, "api_failure", False):
                 break
@@ -571,8 +544,6 @@ def searcher_node(state: ResearchState) -> ResearchState:
             print(f"[STEP {step_id}] Post-curation: {len(unique_results)}/{pre_curation_count}")
 
             # Score each candidate once, then sort+slice to step budget.
-            # Caching the score avoids a second _pre_scrape_score pass inside
-            # the scrape loop (score computation involves content parsing).
             scored = [
                 (r, norm_url, _pre_scrape_score(r, query))
                 for r, norm_url in unique_results
@@ -593,9 +564,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                 citation_counter += 1
                 citation_id = f"[{citation_counter}]"
 
-                # ── Content acquisition + citation status ──
                 # Tavily pre-fetched → local scrape → snippet-only
-                # Status derived from whichever HTTP path actually fires; never double-fetch.
                 tavily_content = getattr(r, "content", None)
                 content = tavily_content if tavily_content else None
                 publish_date = None
@@ -641,13 +610,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
                                 error_type=ErrorTypeEnum.system_error,
                                 message=f"[SCRAPER ERROR] url={norm_url} error_type={error_type} → snippet fallback"
                             ))
-                            # `non_article` is a page-level Trafilatura verdict
-                            # (one URL happened to be a listing/stub), NOT a
-                            # domain-level signal — e.g. bbc.com/sport/index is
-                            # non-article but bbc.com publishes great articles.
-                            # Only count errors that plausibly repeat across
-                            # the whole domain (auth walls, DNS/timeouts,
-                            # servers consistently serving non-HTML).
+
                             if error_type in {
                                 "auth_blocked", "timeout_error", "network_error",
                                 "non_html_content",
@@ -752,9 +715,7 @@ def searcher_node(state: ResearchState) -> ResearchState:
             )
         )
 
-    # -----------------------------------------------
     # OBSERVABILITY
-    # -----------------------------------------------
     log_node_execution(
         node_name="searcher_node",
         input_data=state.query,

@@ -26,9 +26,8 @@ from utils.logger import log_node_execution
 @trace_node(NodeNames.EVALUATOR)
 def evaluator_node(state: ResearchState) -> ResearchState:
 
-    # -------------------------------
+
     # SAFETY INIT
-    # -------------------------------
     if state.errors is None:
         state.errors = []
     if state.node_logs is None:
@@ -50,9 +49,8 @@ def evaluator_node(state: ResearchState) -> ResearchState:
         failed_steps = 0
         total_confidence = 0.0
 
-        # -------------------------------
+      
         # PER-STEP EVALUATION
-        # -------------------------------
         for step in state.research_plan:
             step_id = step.step_id
             query = step.question
@@ -136,9 +134,7 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 )
             )
 
-        # -------------------------------
         # AGGREGATION
-        # -------------------------------
         total_steps = len(step_evaluations)
         avg_confidence = total_confidence / total_steps if total_steps else 0.0
 
@@ -150,9 +146,8 @@ def evaluator_node(state: ResearchState) -> ResearchState:
 
         all_failed = failed_steps == total_steps and total_steps > 0
 
-        # -------------------------------
+
         # DECISION LOGIC
-        # -------------------------------
         if total_steps == 0:
             decision = "replan"
             state.failure_reason = "no steps evaluated"
@@ -178,27 +173,21 @@ def evaluator_node(state: ResearchState) -> ResearchState:
                 decision = "forced_proceed"
                 state.failure_reason = "max retries and replans exhausted"
 
-        # -------------------------------
         # STATE UPDATE
-        # -------------------------------
         state.evaluation = EvaluationResult(
             steps=step_evaluations,
             decision=decision
         )
         state.overall_confidence = avg_confidence
 
-        # -------------------------------
         # UPDATE CITATION SCORES
-        # -------------------------------
         for results in state.search_results.values():
             for r in results:
                 cid = getattr(r, "citation_id", None)
                 if cid and cid in state.citations:
                     state.citations[cid].quality_score = round(r.quality_score, 3)
 
-        # -------------------------------
         # LOGGING
-        # -------------------------------
         node_tokens = state.total_tokens - start_tokens
         node_cost = state.total_cost - start_cost
         

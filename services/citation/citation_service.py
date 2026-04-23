@@ -76,6 +76,5 @@ def status_from_scrape(error_type: str | None) -> CitationStatus:
         return CitationStatus.valid
     if error_type in {"not_found", "http_error"}:
         return CitationStatus.broken
-    # auth_blocked, timeout_error, network_error, non_article, non_html_content,
-    # server_error, content_unusable, unknown_error — URL exists but content not usable
+
     return CitationStatus.stale

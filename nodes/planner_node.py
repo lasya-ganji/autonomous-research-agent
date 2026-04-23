@@ -126,9 +126,7 @@ def planner_node(state: ResearchState, llm_fn=call_llm) -> ResearchState:
                 failure_reason="",
             )
 
-        # -------------------------------
         # LLM CALL
-        # -------------------------------
         res = llm_fn(prompt=prompt, temperature=PLANNER_TEMPERATURE)
 
         if isinstance(res, dict) and res.get("error"):

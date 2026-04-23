@@ -70,9 +70,7 @@ def compute_similarity_score(claim_text: str, chunk: str) -> float:
 
 def citation_manager_node(state: ResearchState) -> ResearchState:
 
-    # -------------------------------
     # SAFETY INIT
-    # -------------------------------
     if state.errors is None:
         state.errors = []
     if state.node_logs is None:
@@ -106,9 +104,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         "num_claims": len(state.synthesis.claims) if state.synthesis else 0
     }
 
-    # -------------------------------
     # URL VALIDATION
-    # -------------------------------
     for cid, citation in state.citations.items():
         try:
             if citation.status != CitationStatus.valid:
@@ -130,9 +126,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
     dropped_citations = 0
     claim_debug = {}
 
-    # -------------------------------
     # CLAIM VALIDATION
-    # -------------------------------
     if state.synthesis and state.synthesis.claims:
 
         for claim in state.synthesis.claims:
@@ -199,9 +193,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
 
     state.used_citation_ids = used_ids
 
-    # -------------------------------
     # PARTIAL PROPAGATION
-    # -------------------------------
     if state.synthesis is not None:
         if len(used_ids) < MIN_REQUIRED_CITATIONS or state.is_partial:
             state.synthesis.partial = True
@@ -211,9 +203,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
 
     print(f"[CITATION] Used: {len(used_ids)} | Dropped: {dropped_citations}")
 
-    # -------------------------------
     # METRICS
-    # -------------------------------
     num_valid = sum(1 for c in state.citations.values() if c.status == CitationStatus.valid)
     num_broken = sum(1 for c in state.citations.values() if c.status == CitationStatus.broken)
     num_stale = sum(1 for c in state.citations.values() if c.status == CitationStatus.stale)

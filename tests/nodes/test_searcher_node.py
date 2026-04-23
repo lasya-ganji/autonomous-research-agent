@@ -16,9 +16,7 @@ class MockResult:
         self.relevance_score = relevance_score
 
 
-# -----------------------------
 # TEST 1: basic success flow
-# -----------------------------
 def test_searcher_generates_results():
 
     def mock_search(query, exclude_domains=None):
@@ -61,10 +59,7 @@ def test_searcher_generates_results():
     assert len(result.search_results[1]) > 0
     assert len(result.citations) > 0
 
-
-# -----------------------------
 # TEST 2: fallback search works
-# -----------------------------
 def test_searcher_fallback_query():
     """
     Primary query (10 words) returns [].
@@ -101,10 +96,7 @@ def test_searcher_fallback_query():
 
     assert len(result.search_results[1]) > 0
 
-
-# -----------------------------
 # TEST 3: handles empty results
-# -----------------------------
 def test_searcher_no_results():
 
     def mock_search(query, exclude_domains=None):
@@ -126,9 +118,7 @@ def test_searcher_no_results():
     assert result.search_results[1] == []
 
 
-# -----------------------------
 # TEST 4: deduplication works
-# -----------------------------
 def test_searcher_deduplication():
     """
     Two results with the same URL — node's cross-step dedup keeps only the first.
@@ -149,7 +139,7 @@ def test_searcher_deduplication():
         ]
 
     def mock_dedup(results, embedding_fn=None):
-        return results  # let node handle URL dedup
+        return results  
 
     state = ResearchState(query="AI")
     state.research_plan = [
@@ -166,10 +156,7 @@ def test_searcher_deduplication():
 
     assert len(result.search_results[1]) == 1
 
-
-# -----------------------------
 # TEST 5: error handling
-# -----------------------------
 def test_searcher_error_handling():
 
     def mock_search(query, exclude_domains=None):

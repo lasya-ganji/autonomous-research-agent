@@ -87,12 +87,10 @@ def scrape_url(url: str) -> dict:
         html = response.text
 
         # favor_precision=True makes Trafilatura treat non-article pages as None
-        # rather than extracting nav/boilerplate noise
         extracted = trafilatura.extract(html, favor_precision=True)
         metadata = trafilatura.extract_metadata(html)
 
         if extracted is None:
-            # Trafilatura is confident this is not an article page (forum, video, profile, etc.)
             print(f"[SCRAPER ERROR] url={url} reason=non_article (trafilatura precision reject)")
             return _failed("non_article")
 

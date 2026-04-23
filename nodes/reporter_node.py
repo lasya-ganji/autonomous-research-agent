@@ -23,17 +23,13 @@ from config.constants.llm_constants import REPORTER_TEMPERATURE
 def reporter_node(state: ResearchState) -> ResearchState:
 
     try:
-        # -------------------------------
         # SAFETY INIT
-        # -------------------------------
         if state.errors is None:
             state.errors = []
         if state.node_logs is None:
             state.node_logs = {}
 
-        # -------------------------------
         # EMPTY SYNTHESIS
-        # -------------------------------
         if not state.synthesis or not state.synthesis.claims:
             state.report = ReportModel(
                 title="Research Report",
@@ -58,17 +54,13 @@ def reporter_node(state: ResearchState) -> ResearchState:
             log_node_execution("reporter_node", {}, {})
             return state
 
-        # -------------------------------
         # VALID CITATIONS
-        # -------------------------------
         valid_citations = {
             cid: c for cid, c in state.citations.items()
             if c.status == CitationStatus.valid
         }
 
-        # -------------------------------
         # COLLECT USED IDS
-        # -------------------------------
         used_ids: Set[str] = set()
         for claim in state.synthesis.claims:
             for cid in getattr(claim, "citation_ids", []):
@@ -83,9 +75,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         id_mapping = {old: f"[{i+1}]" for i, old in enumerate(sorted_ids)}
         state.citation_mapping = id_mapping
 
-        # -------------------------------
         # BUILD SYNTHESIS TEXT
-        # -------------------------------
         synthesis_lines = []
         unverified_count = 0
 
@@ -105,9 +95,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
         synthesis_text = "\n".join(synthesis_lines)
 
-        # -------------------------------
         # CITATIONS LIST
-        # -------------------------------
         citations_list = []
         citations_text_lines = []
 
@@ -129,9 +117,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
 
         citations_text = "\n".join(citations_text_lines)
 
-        # -------------------------------
         # LLM FORMATTER
-        # -------------------------------
         prompt = (
             load_prompt("reporter.txt")
             .replace("{query}", state.query)
@@ -191,18 +177,14 @@ def reporter_node(state: ResearchState) -> ResearchState:
         print(f"[REPORT] Generated length: {len(response)}")
         print(f"[REPORT] Citations used: {len(used_ids)} | Unverified: {unverified_count}")
 
-        # -------------------------------
         # NODE COST
-        # -------------------------------
         node_tokens = usage.get("total_tokens", 0)
         node_cost = calculate_cost(
             usage.get("prompt_tokens", 0),
             usage.get("completion_tokens", 0)
         )
 
-        # -------------------------------
         # GLOBAL COST
-        # -------------------------------
         state.total_tokens += node_tokens
         state.total_cost += node_cost
 
@@ -245,9 +227,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
         if partial_flag:
             state.is_partial = True
 
-        # -------------------------------
         # FINAL REPORT
-        # -------------------------------
         state.report = ReportModel(
             title="Research Report",
             sections=[response] if response else ["No structured report generated."],
@@ -262,9 +242,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             },
         )
 
-        # -------------------------------
         # OBSERVABILITY
-        # -------------------------------
         node_name = NodeNames.REPORTER
         existing_log = state.node_logs.get(node_name, {})
 
