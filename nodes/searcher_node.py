@@ -41,6 +41,14 @@ from config.constants.node_constants.search_constants import (
     MAX_PER_DOMAIN,
     MAX_SCRAPES,
     STOPWORDS,
+    PRE_SCRAPE_TAVILY_WEIGHT,
+    PRE_SCRAPE_SNIPPET_WEIGHT,
+    PRE_SCRAPE_TITLE_WEIGHT,
+    PRE_SCRAPE_TAVILY_DEFAULT,
+    SNIPPET_DENSITY_NORM,
+    CURATOR_TEMPERATURE,
+    CURATOR_TIMEOUT,
+    CURATOR_SNIPPET_LIMIT,
 )
 
 
@@ -55,17 +63,17 @@ def _pre_scrape_score(result, query: str) -> float:
       - Snippet word density  (0.3 weight)
       - Title-query Jaccard   (0.2 weight)
     """
-    tavily_score = float(getattr(result, "relevance_score", 0.5) or 0.5)
+    tavily_score = float(getattr(result, "relevance_score", PRE_SCRAPE_TAVILY_DEFAULT) or PRE_SCRAPE_TAVILY_DEFAULT)
 
     snippet = (getattr(result, "snippet", "") or "").strip()
-    snippet_density = min(len(snippet.split()) / 60.0, 1.0)
+    snippet_density = min(len(snippet.split()) / SNIPPET_DENSITY_NORM, 1.0)
 
     query_terms = set(query.lower().split()) - STOPWORDS
     title_terms = set((getattr(result, "title", "") or "").lower().split()) - STOPWORDS
     union = query_terms | title_terms
     title_overlap = len(query_terms & title_terms) / len(union) if union else 0.0
 
-    score = 0.5 * tavily_score + 0.3 * snippet_density + 0.2 * title_overlap
+    score = PRE_SCRAPE_TAVILY_WEIGHT * tavily_score + PRE_SCRAPE_SNIPPET_WEIGHT * snippet_density + PRE_SCRAPE_TITLE_WEIGHT * title_overlap
     return round(min(max(score, 0.0), 1.0), 3)
 
 
@@ -231,13 +239,13 @@ def _curate_sources(candidates: list, query: str) -> tuple:
         {
             "url": url,
             "title": getattr(r, "title", "") or "",
-            "snippet": (getattr(r, "snippet", "") or "")[:300],
+            "snippet": (getattr(r, "snippet", "") or "")[:CURATOR_SNIPPET_LIMIT],
         }
         for r, url in needs_llm
     ], indent=2)
     prompt = template.replace("{{QUERY}}", query).replace("{{SOURCES}}", sources_payload)
 
-    response = call_llm(prompt, temperature=0.0, timeout=30.0)
+    response = call_llm(prompt, temperature=CURATOR_TEMPERATURE, timeout=CURATOR_TIMEOUT)
 
     # Extract token usage regardless of success/failure
     raw_usage = response.get("usage", {})
