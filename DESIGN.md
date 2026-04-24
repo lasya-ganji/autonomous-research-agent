@@ -219,17 +219,28 @@ class SynthesisModel(BaseModel):
 
 ## Functional Limitations
 
-**Synthesis context uses approximate chunk ranking:**
-Chunks are ranked using word overlap rather than semantic embeddings. This is a CPU-only approximation that can miss semantically relevant chunks that share few exact words with the query.
-
 **No persistent state or session memory:**
 Each agent run starts with a fresh `ResearchState`. There is no caching of prior research, no cross-session memory, and no deduplication against previously researched topics. Every invocation is fully stateless.
 
-**No parallelism across plan steps:**
-The searcher node processes all 3 plan steps sequentially. Parallel execution using `asyncio` or `ThreadPoolExecutor` could reduce search latency by up to 3×.
+**Domain authority uses rule-based heuristics, not commercial SEO metrics:**
+We estimate source credibility using simple, rule-based heuristics instead of paid SEO metrics. This includes tier-based scoring (e.g., high-authority, research, government/education, blogs), TLD boosts like .gov or .edu, and configurable rules in domain_authority.json.
 
-**SentenceTransformer model loaded synchronously at import:**
-`embedding_service.py` loads `all-MiniLM-L6-v2` at module import time. In a cold-start or serverless environment this adds 2–5 seconds of startup latency before the first request is served.
+This approach keeps things fast, predictable, and cost-efficient since it avoids third-party APIs. The downside is that it doesn’t capture richer signals like backlinks or real-time authority scores from tools like `Moz` .
+
+In the future, we could enhance this by integrating external APIs (if budget allows), moving toward more data-driven credibility scoring while still keeping a lightweight default option.
+
+**Embedding model trade-off (accuracy vs latency):**
+For semantic tasks (like similarity checks and coverage signals), we use `all-MiniLM-L6-v2` because it’s lightweight and fast, making it suitable for real-time use.
+
+Stronger models like `BAAI/bge-large-en`could improve accuracy, especially for subtle meaning differences, but they come with higher compute cost and slower response times.
+
+So this is a conscious trade-off: we prioritize speed and efficiency over maximum accuracy. A good next step would be a hybrid approach—using a fast model for initial filtering and a larger model for final scoring, depending on complexity or performance needs.
+
+**HTML-only content retrieval (format limitation):**
+The system filters out binary files (PDF, DOCX, PPT) and non-article URLs, focusing only on HTML pages. This keeps the pipeline simple, fast, and reliable.
+
+The trade-off is reduced coverage of high-quality sources like `research papers` and  `technical documents `, which may lead to missing authoritative information. Future improvements could include adding document parsing to support multi-format content.
+
 
 ## Production Gaps
 
@@ -238,6 +249,8 @@ The searcher node processes all 3 plan steps sequentially. Parallel execution us
 **No persistent storage:** Results are not saved — refreshing the UI loses all outputs.
 
 **No async execution:** All I/O (scraping, LLM calls, URL validation) is synchronous.
+
+**Cold-start latency:** `embedding_service.py` loads `all-MiniLM-L6-v2` at import, adding 2–5s startup delay.
 
 ---
 
