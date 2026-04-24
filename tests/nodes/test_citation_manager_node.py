@@ -8,7 +8,7 @@ def test_citation_basic_flow():
     from models.citation_models import Citation
     from models.enums import CitationStatus
 
-    # Add citations
+    # citations
     state.citations = {
         "[1]": Citation(
             citation_id="[1]",
@@ -44,7 +44,7 @@ def test_citation_invalid_url():
 
     result = citation_manager_node(state)
 
-    assert len(result.errors) >= 0  # error logging works
+    assert len(result.errors) >= 0  
 
 
 def test_citation_synthesis_alignment():

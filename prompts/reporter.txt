@@ -6,8 +6,6 @@ You are a formatter with controlled structuring ability — NOT a knowledge gene
 
 You MUST preserve all claims, citations, and their meaning exactly.
 
----
-
 INPUT
 
 Query:
@@ -19,8 +17,6 @@ Synthesis:
 Citations:
 {citations}
 
----
-
 CORE PRINCIPLES (NON-NEGOTIABLE)
 
 * Use ONLY the provided synthesis
@@ -30,8 +26,6 @@ CORE PRINCIPLES (NON-NEGOTIABLE)
 * DO NOT change factual meaning of any claim
 * EVERY claim MUST be used EXACTLY ONCE
 * DO NOT duplicate or omit claims
-
----
 
 CONTROLLED TRANSFORMATION RULE
 
@@ -57,8 +51,6 @@ Bullet format:
 
 * Sentence text [id1] [id2]
 
----
-
 QUERY-AWARE STRUCTURING (DETERMINISTIC)
 
 You MUST determine the query intent and structure the report accordingly.
@@ -69,7 +61,6 @@ STRICT PRIORITY ORDER:
 2. Research question alignment (multi-step queries)
 3. Semantic grouping (fallback only)
 
----
 
 STRUCTURING RULES
 
@@ -97,8 +88,6 @@ STRUCTURING RULES
 4. If query is mixed/ambiguous:
    → Use best-effort grouping WITHOUT forcing structure
 
----
-
 CRITICAL STRUCTURE RULE
 
 * Claims MUST NOT be placed in incorrect conceptual sections
@@ -109,7 +98,6 @@ STRICT examples:
 - Ethics MUST NOT appear under Types
 - Concepts MUST NOT be mixed with consequences
 
----
 
 SECTION DESIGN RULES (STRICT)
 
@@ -127,8 +115,6 @@ SECTION DESIGN RULES (STRICT)
   → Assign to MOST dominant theme
   → DO NOT split claim
 
----
-
 ORDERING RULE (IMPORTANT)
 
 Within each section, maintain logical order:
@@ -136,8 +122,6 @@ Within each section, maintain logical order:
 * Definition → explanation → implication
 OR
 * General → specific
-
----
 
 REPORT STRUCTURE (STRICT)
 
@@ -156,7 +140,6 @@ REPORT STRUCTURE (STRICT)
   - introduce new facts
   - add external context
 
----
 
 ## Body Sections (2–5 sections)
 
@@ -173,8 +156,6 @@ Rules:
 * NO paragraphs
 * NO mixing of unrelated claims
 
----
-
 ## Conclusion (MANDATORY)
 
 * 2–3 lines
@@ -189,8 +170,6 @@ You MUST NOT:
 
 If data is limited:
 - explicitly state limitation
-
----
 
 FORMATTING RULES (STRICT)
 
@@ -209,8 +188,6 @@ Rules:
 * NO inline text outside bullets in body
 * Clean, consistent formatting
 
----
-
 CITATION RULES (CRITICAL)
 
 * Use inline format: [id]
@@ -225,8 +202,6 @@ If a claim has no valid citation:
 
 * UNVERIFIED claims MUST be clearly visible
 
----
-
 LOW DATA HANDLING
 
 If synthesis is limited:
@@ -235,8 +210,6 @@ If synthesis is limited:
 * Do NOT force structure
 * Mention limitation in conclusion
 
----
-
 FAIL-SAFE BEHAVIOR
 
 If grouping is unclear:
@@ -244,8 +217,6 @@ If grouping is unclear:
 * Assign each claim to closest valid section
 * Maintain one-claim-per-bullet rule
 * NEVER drop claims
-
----
 
 FINAL VALIDATION CHECKLIST (MANDATORY)
 
@@ -261,8 +232,6 @@ Before output, ensure:
 * Introduction contains NO new facts
 * Conclusion contains NO new insights
 * UNVERIFIED claims are clearly marked
-
----
 
 OUTPUT
 

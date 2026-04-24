@@ -150,10 +150,7 @@ def semantic_dedup(results, top_k=TOP_K_SEMANTIC, threshold=SEMANTIC_DUP_THRESHO
             sim = cosine_similarity(embeddings[i], embeddings[j])
 
             if sim > threshold:
-                # Use Tavily relevance_score as the tie-breaking signal at dedup time —
-                # quality_score is still the neutral default (0.5) here since the
-                # evaluator has not run yet. relevance_score carries the actual Tavily
-                # ML score set by search_tool.
+
                 qi = getattr(top_results[i], "relevance_score", None) or getattr(top_results[i], "quality_score", 0.5)
                 qj = getattr(top_results[j], "relevance_score", None) or getattr(top_results[j], "quality_score", 0.5)
 
@@ -167,7 +164,7 @@ def semantic_dedup(results, top_k=TOP_K_SEMANTIC, threshold=SEMANTIC_DUP_THRESHO
                     else:
                         keep[i] = False
                         break
-                # else: do NOT remove (important for edge_case / same_topic)
+                # else: do NOT remove
 
     deduped = [r for r, k in zip(top_results, keep) if k]
 

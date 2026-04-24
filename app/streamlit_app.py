@@ -16,7 +16,7 @@ from agent_runner import run_agent, classify_query_intent, reframe_query
 from models.enums import CitationStatus
 
 
-# ---------------- NODE NAME CONTRACT ----------------
+# NODE NAMES
 
 NODE_KEYS = {
     "REPORT": "REPORTER",
@@ -27,8 +27,6 @@ NODE_KEYS = {
     "CITATION": "CITATION_MANAGER",
 }
 
-
-# ---------------- UTIL ----------------
 
 def safe_get(obj, key, default=None):
     try:
@@ -52,7 +50,7 @@ def render_report(content):
     st.markdown(content)
 
 
-# ---------------- PAGE ----------------
+# PAGE
 
 st.set_page_config(
     page_title="Autonomous Research Agent",
@@ -66,7 +64,7 @@ query = st.text_input("Research Query", placeholder="Enter your query here...", 
 run_button = st.button("Run Research")
 
 
-# ---------------- RUN ----------------
+# RUN 
 
 if run_button:
 
@@ -115,7 +113,7 @@ if run_button:
         "Report", "Plan", "Search", "Evaluation", "Synthesis", "Citations", "Debug"
     ])
 
-    # ---------------- REPORT ----------------
+    # REPORT 
     with tab1:
         report = result.get("report")
 
@@ -136,7 +134,7 @@ if run_button:
             st.caption(f"Time: {time_taken}s")
 
 
-    # ---------------- PLAN ----------------
+    # PLAN 
     with tab2:
         st.subheader("Research Plan")
 
@@ -157,7 +155,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # ---------------- SEARCH ----------------
+    # SEARCH 
     with tab3:
         st.subheader("Search Results")
 
@@ -187,7 +185,7 @@ if run_button:
             st.caption(f"Time: {time_taken}s")
 
 
-    # ---------------- EVALUATION ----------------
+    # EVALUATION
     with tab4:
         st.subheader("Evaluation")
 
@@ -212,7 +210,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # ---------------- SYNTHESIS ----------------
+    # SYNTHESIS 
     with tab5:
         st.subheader("Synthesised Claims")
 
@@ -240,7 +238,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # ---------------- CITATIONS ----------------
+    # CITATIONS
     with tab6:
         st.subheader("Citations")
 
@@ -270,7 +268,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # ---------------- DEBUG / COST / ERRORS ----------------
+    # DEBUG / COST / ERRORS 
     with tab7:
         st.subheader("Pre-Pipeline")
 

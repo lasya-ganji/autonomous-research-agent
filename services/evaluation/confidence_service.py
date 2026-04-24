@@ -33,9 +33,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
     if not results:
         return 0.0
 
-    # -------------------------------
     # TOP-K SELECTION
-    # -------------------------------
     results = sorted(
         results,
         key=lambda x: getattr(x, "quality_score", 0.0),
@@ -44,14 +42,10 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
 
     scores = [getattr(r, "quality_score", 0.0) for r in results]
 
-    # -------------------------------
     # QUALITY
-    # -------------------------------
     quality = sum(scores) / len(scores) if scores else 0.0
 
-    # -------------------------------
     # EMBEDDINGS
-    # -------------------------------
     query_emb = get_embedding(query)
 
     doc_embeddings = []
@@ -68,9 +62,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
 
     query_vec = np.array(query_emb)
 
-    # -------------------------------
     # COVERAGE
-    # -------------------------------
     coverage_scores = []
     for emb in doc_embeddings:
         denom = np.linalg.norm(query_vec) * np.linalg.norm(emb)
@@ -85,9 +77,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
         if coverage_scores else 0.0
     )
 
-    # -------------------------------
     # AGREEMENT (CENTROID)
-    # -------------------------------
     centroid = np.mean(doc_embeddings, axis=0)
 
     agreement_scores = []
@@ -104,9 +94,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
         if agreement_scores else 0.0
     )
 
-    # -------------------------------
     # DIVERSITY
-    # -------------------------------
     pairwise_sims = []
 
     for i in range(len(doc_embeddings)):
@@ -127,9 +115,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
 
     diversity = 1 - redundancy
 
-    # -------------------------------
     # FINAL CONFIDENCE
-    # -------------------------------
     confidence = (
         QUALITY_WEIGHT * quality +
         COVERAGE_WEIGHT * coverage +
@@ -140,9 +126,7 @@ def compute_confidence(results: List[SearchResult], query: str) -> float:
     # clamp
     confidence = max(MIN_CONFIDENCE, min(confidence, MAX_CONFIDENCE))
 
-    # -------------------------------
     # DEBUG LOG
-    # -------------------------------
     print(
         f"[CONFIDENCE] "
         f"quality={quality:.3f} "

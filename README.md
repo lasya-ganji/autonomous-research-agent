@@ -24,7 +24,7 @@ An autonomous multi-node AI research pipeline built with LangGraph. Given a natu
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-username/autonomous-research-agent.git
+git clone https://github.com/lasya-ganji/autonomous-research-agent.git
 cd autonomous-research-agent
 ```
 

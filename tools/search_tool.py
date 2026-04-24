@@ -71,9 +71,7 @@ def search_tool(query: str, exclude_domains: list = None) -> Union[List[SearchRe
     except Exception as e:
         error_msg = str(e).lower()
 
-        # -------------------------------
         # ERROR CLASSIFICATION
-        # -------------------------------
         if any(x in error_msg for x in ["unauthorized", "invalid api key", "401"]):
             error_type = "api_error"
             severity = "CRITICAL"
@@ -96,9 +94,7 @@ def search_tool(query: str, exclude_domains: list = None) -> Union[List[SearchRe
 
         print(f"[SEARCH TOOL ERROR] {e} | TYPE: {error_type}")
 
-        # -------------------------------
         # RETURN STRUCTURED ERROR
-        # -------------------------------
         return {
             "error": str(e),
             "type": error_type,

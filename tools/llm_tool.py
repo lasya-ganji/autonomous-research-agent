@@ -66,9 +66,7 @@ If JSON is requested:
     except Exception as e:
         error_msg = str(e).lower()
 
-        # -------------------------------
         # ERROR CLASSIFICATION
-        # -------------------------------
         if any(x in error_msg for x in ["unauthorized", "invalid api key", "401"]):
             error_type = "api_error"
 

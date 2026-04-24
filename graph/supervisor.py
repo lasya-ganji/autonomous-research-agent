@@ -46,18 +46,14 @@ def supervisor_node(state: ResearchState) -> ResearchState:
     try:
         _init_state_safety(state)
 
-        # -------------------------------
         # TIME TRACKING
-        # -------------------------------
         now = time.time()
         if getattr(state, "start_time", None) is None:
             state.start_time = now
 
         state.elapsed_time = now - state.start_time
 
-        # -------------------------------
         # SAFE EVALUATION ACCESS
-        # -------------------------------
         decision = None
         confidence = 0.0
 
@@ -71,9 +67,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
                 getattr(state.evaluation, "confidence", 0.0)
             )
 
-        # -------------------------------
         # HARD FAIL: API FAILURE 
-        # -------------------------------
         if getattr(state, "api_failure", False):
 
             state.is_partial = True
@@ -115,9 +109,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             return state
         
 
-        # -------------------------------
         # PARTIAL FINALIZATION
-        # -------------------------------
         if _should_finalize_partial(state):
             state.is_partial = True
             state.next_node = "reporter"
@@ -170,9 +162,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
 
             return state
 
-        # -------------------------------
         # LATENCY-AWARE DECISION
-        # -------------------------------
         latency_reason = None
 
         if state.elapsed_time < T1:
@@ -196,9 +186,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             state.is_partial = True
             latency_reason = "latency_low_confidence_forced_proceed"
 
-        # -------------------------------
         # ROUTING
-        # -------------------------------
         if not state.evaluation:
             state.next_node = "planner"
             reason = "initial_run"
@@ -234,9 +222,7 @@ def supervisor_node(state: ResearchState) -> ResearchState:
             state.next_node = "reporter"
             reason = "fallback"
 
-        # -------------------------------
         # LOGGING
-        # -------------------------------
         state.node_logs[NodeNames.SUPERVISOR] = {
             "decision": decision,
             "reason": reason,

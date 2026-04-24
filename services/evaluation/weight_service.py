@@ -9,7 +9,7 @@ import json
 REQUIRED_KEYS = set(DEFAULT_WEIGHTS.keys())
 
 
-# ---------------- VALIDATION HELPERS ---------------- #
+# VALIDATION HELPERS
 
 def _normalize(weights: Dict[str, float]) -> Dict[str, float]:
     total = sum(weights.values()) or 1
@@ -38,7 +38,7 @@ def _is_valid(weights: Dict[str, float]) -> bool:
     return True
 
 
-# ---------------- MAIN FUNCTION ---------------- #
+# MAIN FUNCTION
 
 def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
     prompt_template = load_prompt("evaluator_weights.txt")
@@ -51,7 +51,7 @@ def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
         response = res.get("content", "")
         usage = res.get("usage", {})
 
-        # ---------------- TOKEN + COST TRACKING ---------------- #
+        # TOKEN + COST TRACKING
         if state and usage:
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)
@@ -68,7 +68,7 @@ def get_dynamic_weights(query: str, state=None) -> Dict[str, float]:
                 state.abort = True
                 return DEFAULT_WEIGHTS
 
-        # ---------------- JSON PARSE ---------------- #
+        # JSON PARSE
         try:
             data = json.loads(response)
         except Exception:

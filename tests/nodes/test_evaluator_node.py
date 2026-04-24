@@ -14,9 +14,7 @@ class MockResult:
         self.citation_id = "[1]"
 
 
-# -----------------------------
 # TEST 1: successful evaluation
-# -----------------------------
 def test_evaluator_proceed():
 
     def mock_score(results, query, state=None):
@@ -42,9 +40,7 @@ def test_evaluator_proceed():
     assert result.evaluation.decision == "proceed"
 
 
-# -----------------------------
 # TEST 2: retry triggered
-# -----------------------------
 def test_evaluator_retry():
 
     def mock_score(results, query, state=None):
@@ -70,9 +66,7 @@ def test_evaluator_retry():
     assert result.evaluation.decision in ["retry", "replan", "proceed"]
 
 
-# -----------------------------
 # TEST 3: no results case
-# -----------------------------
 def test_evaluator_no_results():
 
     state = ResearchState(query="AI")
@@ -88,10 +82,7 @@ def test_evaluator_no_results():
     assert result.evaluation is not None
     assert len(result.errors) > 0  
 
-
-# -----------------------------
 # TEST 4: scoring failure
-# -----------------------------
 def test_evaluator_scoring_error():
 
     def mock_score(results, query, state=None):
@@ -112,10 +103,7 @@ def test_evaluator_scoring_error():
 
     assert len(result.errors) > 0
 
-
-# -----------------------------
 # TEST 5: confidence failure
-# -----------------------------
 def test_evaluator_confidence_error():
 
     def mock_score(results, query, state=None):
@@ -141,13 +129,11 @@ def test_evaluator_confidence_error():
     assert len(result.errors) > 0
 
 
-# -----------------------------
 # TEST 6: max execution safety
-# -----------------------------
 def test_evaluator_max_execution():
 
     state = ResearchState(query="AI")
-    state.node_execution_count = 12  # at limit — handled gracefully by supervisor now
+    state.node_execution_count = 12  # limit
 
     result = evaluator_node(state)
     assert result is not None
