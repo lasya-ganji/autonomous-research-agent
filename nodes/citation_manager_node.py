@@ -2,12 +2,14 @@ from datetime import datetime, timezone
 from typing import Dict, List, Set
 
 from models.state import ResearchState
+from models.synthesis_models import ClaimEvidence
 from models.enums import CitationStatus, SeverityEnum, ErrorTypeEnum
 from models.error_models import ErrorLog
 
 from services.citation.citation_service import validate_url
 from services.retrieval.embedding_service import get_embedding
 from services.retrieval.dedup_service import cosine_similarity
+from utils.evidence_text import extract_best_excerpt
 
 from observability.tracing import trace_node
 from utils.logger import log_node_execution
@@ -134,6 +136,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
             cleaned_ids = []
             citation_scores = {}
             hallucinated = []
+            best_chunks = {}
 
             for cid in claim.citation_ids:
                 cid = normalize_citation_id(cid)
@@ -149,18 +152,36 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                     continue
 
                 best_score = 0.0
+                best_chunk = ""
 
                 for chunk in chunks:
                     score = compute_similarity_score(claim.text, chunk)
                     if score > best_score:
                         best_score = score
+                        best_chunk = chunk
 
                 if best_score > SIMILARITY_THRESHOLD:
                     cleaned_ids.append(cid)
                     citation_scores[cid] = best_score
+                    best_chunks[cid] = best_chunk
                 else:
                     hallucinated.append(cid)
                     dropped_citations += 1
+
+            evidence_items = []
+            for cid in cleaned_ids:
+                citation_obj = state.citations.get(cid)
+                chunk = best_chunks.get(cid, "")
+                evidence_items.append(
+                    ClaimEvidence(
+                        citation_id=cid,
+                        source_title=getattr(citation_obj, "title", "") if citation_obj else "",
+                        source_url=str(getattr(citation_obj, "url", "")) if citation_obj else "",
+                        evidence_snippet=extract_best_excerpt(claim.text, chunk, max_chars=320),
+                        support_score=round(citation_scores.get(cid, 0.0), 3),
+                        matches_claim=cid in citation_scores,
+                    )
+                )
 
             if citation_scores:
                 avg_score = sum(citation_scores.values()) / len(citation_scores)
@@ -169,8 +190,15 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                 claim.citation_ids = cleaned_ids
                 claim.citation_score_map = citation_scores
                 claim.hallucinated_citations = hallucinated
+                claim.evidence = evidence_items
 
                 claim.verified = avg_score > VERIFICATION_THRESHOLD
+                if claim.verified:
+                    claim.support_status = "verified"
+                    claim.support_reason = "supported_by_cited_evidence"
+                else:
+                    claim.support_status = "partially_verified"
+                    claim.support_reason = "weak_evidence_alignment"
 
                 if claim.verified:
                     used_ids.update(cleaned_ids)
@@ -183,15 +211,39 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                 claim.citation_confidence = 0.0
                 claim.citation_score_map = {}
                 claim.hallucinated_citations = hallucinated
+                claim.evidence = []
+                if hallucinated:
+                    claim.support_status = "unverified"
+                    claim.support_reason = "citations_do_not_support_claim"
+                else:
+                    claim.support_status = "partially_verified"
+                    claim.support_reason = "no_citations_provided"
                 state.failure_counts["citation_failures"] += 1
 
             claim_debug[claim.text[:80]] = {
                 "citations": len(cleaned_ids),
                 "confidence": round(claim.citation_confidence, 3),
-                "verified": claim.verified
+                "verified": claim.verified,
+                "support_status": claim.support_status,
             }
 
     state.used_citation_ids = used_ids
+
+    claims = state.synthesis.claims if state.synthesis and state.synthesis.claims else []
+    total_claims = len(claims)
+    verified_count = sum(1 for c in claims if getattr(c, "support_status", "partially_verified") == "verified")
+    partially_verified_count = sum(1 for c in claims if getattr(c, "support_status", "partially_verified") == "partially_verified")
+    unverified_count = sum(1 for c in claims if getattr(c, "support_status", "partially_verified") == "unverified")
+    safe_total = total_claims if total_claims > 0 else 1
+    state.evidence_metrics = {
+        "total_claims": total_claims,
+        "verified": verified_count,
+        "partially_verified": partially_verified_count,
+        "unverified": unverified_count,
+        "verified_pct": round((verified_count / safe_total) * 100, 2) if total_claims else 0.0,
+        "partially_verified_pct": round((partially_verified_count / safe_total) * 100, 2) if total_claims else 0.0,
+        "unverified_pct": round((unverified_count / safe_total) * 100, 2) if total_claims else 0.0,
+    }
 
     # PARTIAL PROPAGATION
     if state.synthesis is not None:
@@ -219,6 +271,7 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
         "used": len(used_ids),
         "dropped": dropped_citations,
         "claim_debug": claim_debug,
+        "evidence_metrics": dict(state.evidence_metrics),
         "failure_counts": dict(state.failure_counts),
         "errors_count": len(state.errors)
     })

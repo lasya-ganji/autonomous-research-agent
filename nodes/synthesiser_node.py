@@ -261,11 +261,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
-                if not filtered_ids:
-                    dropped_claims += 1
-                    continue
-
-                used_ids.update(filtered_ids)
+                has_supporting_citations = len(filtered_ids) > 0
+                if has_supporting_citations:
+                    used_ids.update(filtered_ids)
 
                 confidence = float(c.get("confidence", 0.5))
                 confidence = max(0.0, min(confidence, 1.0))
@@ -275,8 +273,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                         text=text,
                         citation_ids=filtered_ids,
                         confidence=confidence,
-                        verified=True,
-                        citation_confidence=1.0,
+                        verified=has_supporting_citations,
+                        citation_confidence=1.0 if has_supporting_citations else 0.0,
+                        support_status="partially_verified" if not has_supporting_citations else "verified",
+                        support_reason="missing_initial_citation_support" if not has_supporting_citations else "initial_citation_match",
                     )
                 )
 

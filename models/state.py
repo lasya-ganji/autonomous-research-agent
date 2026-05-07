@@ -62,6 +62,7 @@ class ResearchState(BaseModel):
 
     # OBSERVABILITY
     node_logs: Dict[str, Any] = Field(default_factory=dict)
+    evidence_metrics: Dict[str, Any] = Field(default_factory=dict)
 
     total_tokens: int = 0
     total_cost: float = 0.0

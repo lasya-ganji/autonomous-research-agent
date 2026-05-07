@@ -123,6 +123,16 @@ if run_button:
                 render_report(sections[0])
             else:
                 st.warning("Report content is empty.")
+
+            evidence_metrics = safe_get(safe_get(report, "metadata", {}), "evidence_metrics", {}) or {}
+            if evidence_metrics:
+                st.divider()
+                st.subheader("Citation Verification Coverage")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Verified", f"{safe_get(evidence_metrics, 'verified', 0)} ({safe_get(evidence_metrics, 'verified_pct', 0)}%)")
+                c2.metric("Partially Verified", f"{safe_get(evidence_metrics, 'partially_verified', 0)} ({safe_get(evidence_metrics, 'partially_verified_pct', 0)}%)")
+                c3.metric("Unverified", f"{safe_get(evidence_metrics, 'unverified', 0)} ({safe_get(evidence_metrics, 'unverified_pct', 0)}%)")
+                c4.metric("Total Claims", safe_get(evidence_metrics, "total_claims", 0))
         else:
             st.error("No report generated.")
 
@@ -224,10 +234,23 @@ if run_button:
                 citation_ids = safe_get(claim, "citation_ids", []) or []
                 verified = safe_get(claim, "verified", False)
                 citation_text = " ".join(citation_ids) if verified else "UNVERIFIED"
+                support_status = safe_get(claim, "support_status", "partially_verified")
+                support_reason = safe_get(claim, "support_reason", "citation_support_pending")
 
                 st.caption(
-                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text}"
+                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text} | Status: {support_status.upper()} ({support_reason})"
                 )
+
+                evidence_items = safe_get(claim, "evidence", []) or []
+                if evidence_items:
+                    for ev in evidence_items:
+                        cid = safe_get(ev, "citation_id", "")
+                        score = round(safe_get(ev, "support_score", 0), 3)
+                        snippet = safe_get(ev, "evidence_snippet", "")
+                        source_title = safe_get(ev, "source_title", "")
+                        st.markdown(f"**{cid} {source_title}** (score: {score})")
+                        if snippet:
+                            st.code(snippet, language="text")
                 st.divider()
         else:
             st.info("No synthesis available.")

@@ -14,6 +14,7 @@ from utils.logger import log_node_execution
 from config.constants.node_constants.node_names import NodeNames
 
 from services.system.cost_tracker import calculate_cost
+from utils.evidence_text import clean_evidence_text, extract_best_excerpt
 
 from config.constants.node_constants.reporter_constants import MIN_REQUIRED_CITATIONS
 from config.constants.llm_constants import REPORTER_TEMPERATURE
@@ -35,6 +36,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 title="Research Report",
                 sections=["No reliable data found."],
                 citations=[],
+                claim_evidence=[],
                 metadata={
                     "query": state.query,
                     "timestamp": datetime.now().isoformat(),
@@ -98,15 +100,21 @@ def reporter_node(state: ResearchState) -> ResearchState:
         # CITATIONS LIST
         citations_list = []
         citations_text_lines = []
+        claim_evidence = []
+        citation_snippet_map: Dict[str, str] = {}
 
         for cid in sorted_ids:
             c = valid_citations[cid]
+            chunks = state.citation_chunks.get(cid, [])
+            snippet = chunks[0] if chunks else ""
+            snippet = (snippet[:320] + "...") if len(snippet) > 320 else snippet
 
             entry = {
                 "id": id_mapping[cid],
                 "url": c.url,
                 "title": getattr(c, "title", ""),
                 "quality_score": getattr(c, "quality_score", None),
+                "evidence_snippet": snippet,
                 "accessed_at": datetime.now().isoformat(),
             }
 
@@ -116,6 +124,49 @@ def reporter_node(state: ResearchState) -> ResearchState:
             )
 
         citations_text = "\n".join(citations_text_lines)
+
+        for claim in state.synthesis.claims:
+            mapped_ids = [id_mapping.get(cid, cid) for cid in getattr(claim, "citation_ids", [])]
+            claim_evidence_entries = []
+            for ev in getattr(claim, "evidence", []):
+                mapped_cid = id_mapping.get(ev.citation_id, ev.citation_id)
+                cleaned_snippet = clean_evidence_text(ev.evidence_snippet or "")
+                claim_evidence_entries.append(
+                    {
+                        "citation_id": mapped_cid,
+                        "source_title": ev.source_title,
+                        "source_url": ev.source_url,
+                        "evidence_snippet": cleaned_snippet,
+                        "support_score": ev.support_score,
+                    }
+                )
+                if cleaned_snippet and mapped_cid not in citation_snippet_map:
+                    citation_snippet_map[mapped_cid] = cleaned_snippet
+
+            claim_evidence.append(
+                {
+                    "claim_text": claim.text,
+                    "support_status": getattr(claim, "support_status", "partially_verified"),
+                    "support_reason": getattr(claim, "support_reason", "citation_support_pending"),
+                    "confidence": round(getattr(claim, "confidence", 0.0), 3),
+                    "citation_confidence": round(getattr(claim, "citation_confidence", 0.0), 3),
+                    "citation_ids": mapped_ids,
+                    "evidence": claim_evidence_entries,
+                }
+            )
+
+        # Finalize citation snippets using claim-aligned evidence first, then clean fallback.
+        for entry in citations_list:
+            cid = entry["id"]
+            if cid in citation_snippet_map:
+                entry["evidence_snippet"] = citation_snippet_map[cid]
+                continue
+
+            original_cid = next((old for old, new in id_mapping.items() if new == cid), None)
+            fallback_chunks = state.citation_chunks.get(original_cid, []) if original_cid else []
+            raw_fallback = fallback_chunks[0] if fallback_chunks else ""
+            fallback_excerpt = extract_best_excerpt("", raw_fallback, max_chars=320)
+            entry["evidence_snippet"] = fallback_excerpt or "No readable evidence excerpt available."
 
         # LLM FORMATTER
         prompt = (
@@ -161,10 +212,12 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 title="Research Report",
                 sections=["Report generation failed due to LLM error."],
                 citations=citations_list,
+                claim_evidence=claim_evidence,
                 metadata={
                     "query": state.query,
                     "timestamp": datetime.now().isoformat(),
                     "partial": True,
+                    "evidence_metrics": dict(getattr(state, "evidence_metrics", {})),
                     "errors": [e.model_dump() for e in state.errors],
                 },
             )
@@ -205,12 +258,14 @@ def reporter_node(state: ResearchState) -> ResearchState:
                 title="Research Report",
                 sections=[response] if response else ["Cost limit exceeded."],
                 citations=citations_list,
+                claim_evidence=claim_evidence,
                 metadata={
                     "query": state.query,
                     "timestamp": datetime.now().isoformat(),
                     "partial": True,
                     "total_tokens": state.total_tokens,
                     "total_cost": state.total_cost,
+                    "evidence_metrics": dict(getattr(state, "evidence_metrics", {})),
                     "errors": [e.model_dump() for e in state.errors],
                 },
             )
@@ -232,12 +287,14 @@ def reporter_node(state: ResearchState) -> ResearchState:
             title="Research Report",
             sections=[response] if response else ["No structured report generated."],
             citations=citations_list,
+            claim_evidence=claim_evidence,
             metadata={
                 "query": state.query,
                 "timestamp": datetime.now().isoformat(),
                 "partial": partial_flag,
                 "total_tokens": state.total_tokens,
                 "total_cost": state.total_cost,
+                "evidence_metrics": dict(getattr(state, "evidence_metrics", {})),
                 "errors": [e.model_dump() for e in state.errors],
             },
         )
@@ -283,6 +340,7 @@ def reporter_node(state: ResearchState) -> ResearchState:
             title="Research Report",
             sections=["Critical failure during report generation."],
             citations=[],
+            claim_evidence=[],
             metadata={
                 "query": state.query,
                 "timestamp": datetime.now().isoformat(),
