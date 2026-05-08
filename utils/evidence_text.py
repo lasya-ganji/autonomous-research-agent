@@ -1,18 +1,26 @@
 import re
 
+from config.constants.evidence_text_constants import (
+    BASE64_PATTERN,
+    DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS,
+    EVIDENCE_STOPWORDS,
+    MARKDOWN_IMAGE_PATTERN,
+    MARKDOWN_LINK_PATTERN,
+    MIN_TOKEN_LENGTH,
+    NON_WORD_HEAVY_PATTERN,
+    SENTENCE_SPLIT_PATTERN,
+    URL_PATTERN,
+    WEAK_SENTENCE_ALIGNMENT_THRESHOLD,
+    WHITESPACE_PATTERN,
+)
 
-_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
-_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
-_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{80,}={0,2}")
-_NON_WORD_HEAVY_RE = re.compile(r"[^\w\s.,;:!?()'-]")
-_WHITESPACE_RE = re.compile(r"\s+")
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-
-_STOPWORDS = {
-    "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "by", "with",
-    "is", "are", "was", "were", "be", "as", "at", "that", "this", "it", "from",
-}
+_URL_RE = re.compile(URL_PATTERN, re.IGNORECASE)
+_MARKDOWN_IMAGE_RE = re.compile(MARKDOWN_IMAGE_PATTERN)
+_MARKDOWN_LINK_RE = re.compile(MARKDOWN_LINK_PATTERN)
+_BASE64_RE = re.compile(BASE64_PATTERN)
+_NON_WORD_HEAVY_RE = re.compile(NON_WORD_HEAVY_PATTERN)
+_WHITESPACE_RE = re.compile(WHITESPACE_PATTERN)
+_SENTENCE_SPLIT_RE = re.compile(SENTENCE_SPLIT_PATTERN)
 
 
 def clean_evidence_text(text: str) -> str:
@@ -31,7 +39,10 @@ def clean_evidence_text(text: str) -> str:
 
 def _tokenize(text: str) -> set[str]:
     parts = re.findall(r"[A-Za-z0-9']+", (text or "").lower())
-    return {p for p in parts if p and p not in _STOPWORDS and len(p) > 2}
+    return {
+        p for p in parts
+        if p and p not in EVIDENCE_STOPWORDS and len(p) >= MIN_TOKEN_LENGTH
+    }
 
 
 def _overlap_score(a: str, b: str) -> float:
@@ -42,7 +53,11 @@ def _overlap_score(a: str, b: str) -> float:
     return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
 
 
-def extract_best_excerpt(claim_text: str, raw_text: str, max_chars: int = 320) -> str:
+def extract_best_excerpt(
+    claim_text: str,
+    raw_text: str,
+    max_chars: int = DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS,
+) -> str:
     cleaned = clean_evidence_text(raw_text)
     if not cleaned:
         return ""
@@ -58,8 +73,7 @@ def extract_best_excerpt(claim_text: str, raw_text: str, max_chars: int = 320) -
     scored = [(s, _overlap_score(claim_text, s)) for s in sentences]
     best_sentence, best_score = max(scored, key=lambda x: x[1])
 
-    # If sentence alignment is weak, fall back to a compact cleaned chunk slice.
-    if best_score < 0.05:
+    if best_score < WEAK_SENTENCE_ALIGNMENT_THRESHOLD:
         return cleaned[:max_chars]
 
     if len(best_sentence) <= max_chars:

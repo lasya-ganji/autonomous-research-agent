@@ -9,6 +9,7 @@ from models.error_models import ErrorLog
 from services.citation.citation_service import validate_url
 from services.retrieval.embedding_service import get_embedding
 from services.retrieval.dedup_service import cosine_similarity
+from config.constants.evidence_text_constants import DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS
 from utils.evidence_text import extract_best_excerpt
 
 from observability.tracing import trace_node
@@ -177,7 +178,9 @@ def citation_manager_node(state: ResearchState) -> ResearchState:
                         citation_id=cid,
                         source_title=getattr(citation_obj, "title", "") if citation_obj else "",
                         source_url=str(getattr(citation_obj, "url", "")) if citation_obj else "",
-                        evidence_snippet=extract_best_excerpt(claim.text, chunk, max_chars=320),
+                        evidence_snippet=extract_best_excerpt(
+                            claim.text, chunk, max_chars=DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS
+                        ),
                         support_score=round(citation_scores.get(cid, 0.0), 3),
                         matches_claim=cid in citation_scores,
                     )

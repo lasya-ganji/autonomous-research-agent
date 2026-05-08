@@ -14,6 +14,7 @@ from utils.logger import log_node_execution
 from config.constants.node_constants.node_names import NodeNames
 
 from services.system.cost_tracker import calculate_cost
+from config.constants.evidence_text_constants import DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS
 from utils.evidence_text import clean_evidence_text, extract_best_excerpt
 
 from config.constants.node_constants.reporter_constants import MIN_REQUIRED_CITATIONS
@@ -107,7 +108,8 @@ def reporter_node(state: ResearchState) -> ResearchState:
             c = valid_citations[cid]
             chunks = state.citation_chunks.get(cid, [])
             snippet = chunks[0] if chunks else ""
-            snippet = (snippet[:320] + "...") if len(snippet) > 320 else snippet
+            cap = DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS
+            snippet = (snippet[:cap] + "...") if len(snippet) > cap else snippet
 
             entry = {
                 "id": id_mapping[cid],
@@ -165,7 +167,9 @@ def reporter_node(state: ResearchState) -> ResearchState:
             original_cid = next((old for old, new in id_mapping.items() if new == cid), None)
             fallback_chunks = state.citation_chunks.get(original_cid, []) if original_cid else []
             raw_fallback = fallback_chunks[0] if fallback_chunks else ""
-            fallback_excerpt = extract_best_excerpt("", raw_fallback, max_chars=320)
+            fallback_excerpt = extract_best_excerpt(
+                "", raw_fallback, max_chars=DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS
+            )
             entry["evidence_snippet"] = fallback_excerpt or "No readable evidence excerpt available."
 
         # LLM FORMATTER
