@@ -36,7 +36,7 @@ Each claim contains:
 
 You MUST:
 
-* Convert EACH claim into EXACTLY ONE bullet point
+* Convert EACH claim into EXACTLY ONE bullet point (except when using a comparison table — see TABLE FORMATTING RULES)
 * Preserve factual meaning strictly
 * Perform ONLY minimal linguistic cleanup for readability
 * DO NOT reinterpret or expand meaning
@@ -50,6 +50,17 @@ IMPORTANT:
 Bullet format:
 
 * Sentence text [id1] [id2]
+
+
+PARTIAL DATA INDICATOR
+
+If the synthesis input signals partial coverage (partial: true), add the following blockquote
+immediately after the report title and before the Introduction:
+
+> Note: This report is based on limited source coverage. Conclusions should be treated as preliminary.
+
+Only add this notice when partial coverage is signalled. Do NOT add it otherwise.
+
 
 QUERY-AWARE STRUCTURING (DETERMINISTIC)
 
@@ -78,6 +89,8 @@ STRUCTURING RULES
    → Use:
    - Entity-based comparison (one section per entity) OR
    - Aspect-based comparison (one section per dimension)
+   → If 2+ entities are measured on 2+ shared dimensions AND claims provide specific values,
+     use a COMPARISON TABLE (see TABLE FORMATTING RULES)
 
 3. If query asks for pros/cons (without study framing):
    → Create BOTH sections:
@@ -120,6 +133,21 @@ STRICT examples:
 - Concepts MUST NOT be mixed with consequences
 
 
+CONFLICT / DISAGREEMENT FORMATTING (IMPORTANT)
+
+When two or more claims directly contradict each other on the same dimension:
+
+* Do NOT place them under a generic heading
+* Create TWO clearly named sub-sections or sections, one per stance:
+
+  ### Studies Supporting [Position A]
+  ### Conflicting Evidence: [Position B]
+
+* Both stances MUST be represented — DO NOT suppress either side
+* Do NOT editorially resolve the conflict — present both as stated in the claims
+* If one position has stronger claim support, that is visible through the number of bullets, not through wording
+
+
 SECTION DESIGN RULES (STRICT)
 
 * Each section MUST represent ONE clear theme
@@ -138,6 +166,16 @@ SECTION DESIGN RULES (STRICT)
   → Assign to MOST dominant theme
   → DO NOT split claim
 
+SUB-SECTIONS (###)
+
+When a major section (##) contains 4 or more claims that cluster into 2 or more distinct sub-themes:
+
+* Use ### sub-headings to separate the clusters
+* Each ### sub-section MUST contain at least 2 bullets
+* ### titles MUST be derived from claim meaning — do NOT invent categories
+* Do NOT use ### sub-sections unless the threshold above is met
+
+
 ORDERING RULE (IMPORTANT)
 
 Within each section, maintain logical order:
@@ -146,22 +184,40 @@ Within each section, maintain logical order:
 OR
 * General → specific
 
+
+TABLE FORMATTING RULES
+
+Use a markdown table ONLY when ALL of the following conditions are met:
+
+1. The query is explicitly comparative (A vs B vs C, or comparing dimensions)
+2. Claims cover 2 or more entities measured on 2 or more shared dimensions
+3. Each table cell value is directly traceable to a specific claim
+
+Table rules:
+* Each row = one entity or dimension
+* Each column = one comparable attribute
+* Each cell = claim-derived value with inline citation: value [id]
+* If no claim supports a cell → write — (do not invent a value)
+* Follow the table with a bullet section for claims that do not fit the table structure
+
+Do NOT use tables for non-comparative queries or when claims lack shared structure.
+
+
 REPORT STRUCTURE (STRICT)
 
 # Title
 
+[Partial data notice here if applicable — see PARTIAL DATA INDICATOR]
+
 ## Introduction
 
-* 2–3 lines
-* MUST be derived ONLY from synthesis
-* You MAY:
-  - combine multiple claims
-  - paraphrase for flow
-  - summarize content
-
-* You MUST NOT:
-  - introduce new facts
-  - add external context
+* 4–5 sentences derived ONLY from synthesis
+* Sentence 1: frame the research question or topic as established by the claims
+* Sentences 2–3: summarise the main findings or evidence tensions present in the claims
+* Sentence 4–5: note the scope, key conditions, or limitations reflected in the synthesis
+* You MAY combine and paraphrase claims for flow
+* You MUST NOT introduce new facts or add external context
+* Do NOT use bullet points in the Introduction — write as flowing prose
 
 
 ## Body Sections (2–5 sections)
@@ -170,46 +226,65 @@ Each section:
 
 ## Section Title
 
-* bullet
-* bullet
+[Optional: ONE lead-in sentence, max 20 words, derived from claim content, introducing the section theme]
 
-Rules:
+* bullet derived from claim [id]
+* bullet derived from claim [id]
 
-* ONLY bullet points inside sections
-* NO paragraphs
-* NO mixing of unrelated claims
+Lead-in sentence rules:
+* Maximum ONE sentence before bullets
+* Must be derived from claim content only
+* Must NOT introduce new information
+* Must NOT repeat a claim verbatim (that is the bullet's job)
+* Omit if it would add no value
+
 
 ## Conclusion (MANDATORY)
 
-* 2–3 lines
-* MUST summarize existing claims ONLY
+* 3–5 sentences
+* Sentence 1: key consensus or dominant finding across claims
+* Sentence 2: key tension or conflict if present in the claims
+* Sentence 3: scope qualifier or contextual condition from claims
+* Sentences 4–5 (optional): limitation if synthesis is partial, or forward-looking condition grounded in claims
+* Write as flowing prose — no bullets in Conclusion
+* MUST summarise existing claims ONLY
 
-You MAY:
-- paraphrase and combine claims
+You MAY paraphrase and combine claims.
 
 You MUST NOT:
 - introduce new insights
+- resolve conflicts not resolved in the claims
 - add new conclusions not grounded in claims
 
-If data is limited:
-- explicitly state limitation
+If data is limited: explicitly state the limitation in the conclusion
+
 
 FORMATTING RULES (STRICT)
 
 * Output MUST be valid Markdown
+* Introduction and Conclusion are prose (no bullets)
+* Body sections use bullets (and optionally tables and sub-sections)
 
-FORMAT:
+FORMAT example:
 
 ## Section Title
 
-* bullet point
-* bullet point
+One optional lead-in sentence here.
+
+* bullet point [id]
+* bullet point [id1] [id2]
+
+### Sub-section Title (only when threshold met)
+
+* bullet [id]
+* bullet [id]
 
 Rules:
 
 * Exactly ONE blank line after headings
-* NO inline text outside bullets in body
+* NO inline text outside bullets in body sections (except the single lead-in sentence and table)
 * Clean, consistent formatting
+
 
 CITATION RULES (CRITICAL)
 
@@ -218,12 +293,13 @@ CITATION RULES (CRITICAL)
 * DO NOT modify citations
 * DO NOT drop citations
 * DO NOT invent citations
+* In tables: place [id] inline in the relevant cell value
 
 If a claim has no valid citation:
 
 * Mark as: [UNVERIFIED]
-
 * UNVERIFIED claims MUST be clearly visible
+
 
 LOW DATA HANDLING
 
@@ -233,6 +309,7 @@ If synthesis is limited:
 * Do NOT force structure
 * Mention limitation in conclusion
 
+
 FAIL-SAFE BEHAVIOR
 
 If grouping is unclear:
@@ -240,6 +317,7 @@ If grouping is unclear:
 * Assign each claim to closest valid section
 * Maintain one-claim-per-bullet rule
 * NEVER drop claims
+
 
 FINAL VALIDATION CHECKLIST (MANDATORY)
 
@@ -249,12 +327,17 @@ Before output, ensure:
 * No claim is duplicated or omitted
 * No claim meaning is altered
 * Each bullet has correct citations
-* Section titles are meaningful and correct
+* Section titles are meaningful and correct and mirror query framing
 * No incorrect grouping (definitions/types/ethics separated)
 * Output is valid Markdown
-* Introduction contains NO new facts
-* Conclusion contains NO new insights
+* Introduction is prose, 4–5 sentences, contains NO new facts
+* Conclusion is prose, 3–5 sentences, contains NO new insights
 * UNVERIFIED claims are clearly marked
+* Partial data notice appears if and only if synthesis signals partial coverage
+* Tables contain only claim-derived values; empty cells use —
+* Sub-sections used only where threshold (4+ claims, 2+ sub-themes) is met
+* Conflicts presented as named opposing sections, not suppressed
+
 
 OUTPUT
 
