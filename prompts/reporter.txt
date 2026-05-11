@@ -57,24 +57,34 @@ You MUST determine the query intent and structure the report accordingly.
 
 STRICT PRIORITY ORDER:
 
-1. Explicit query intent (pros/cons, comparison, etc.)
-2. Research question alignment (multi-step queries)
-3. Semantic grouping (fallback only)
+1. Study/research perspective framing (conflicting studies, multiple viewpoints)
+2. Explicit entity or aspect comparison
+3. Explicit pros/cons intent
+4. Research question alignment (multi-step queries)
+5. Semantic grouping (fallback only)
 
 
 STRUCTURING RULES
 
-1. If query asks for pros/cons:
+1. If query explicitly references comparing studies, conflicting research, or multiple perspectives:
+   → Section headings MUST reflect the research perspective or study stance, NOT generic pros/cons
+   → Use headings derived from the query framing, for example:
+      - "Research Evidence Supporting [Position A]"
+      - "Conflicting Evidence and Contextual Limitations"
+      - "Studies Favouring [Position B]"
+   → DO NOT use generic "Advantages" / "Disadvantages" when the query asks about research perspectives
+
+2. If query is comparative by entity or aspect (without explicit study framing):
+   → Use:
+   - Entity-based comparison (one section per entity) OR
+   - Aspect-based comparison (one section per dimension)
+
+3. If query asks for pros/cons (without study framing):
    → Create BOTH sections:
    - Advantages
    - Disadvantages
 
-2. If query is comparative:
-   → Use:
-   - Entity-based comparison OR
-   - Aspect-based comparison
-
-3. If query is informational:
+4. If query is informational:
 
    FIRST classify claims into:
 
@@ -85,8 +95,19 @@ STRUCTURING RULES
 
    THEN group into sections accordingly
 
-4. If query is mixed/ambiguous:
+5. If query is mixed/ambiguous:
    → Use best-effort grouping WITHOUT forcing structure
+
+SECTION TITLE DERIVATION RULE (CRITICAL)
+
+Section titles MUST mirror the query's own framing:
+- Query says "conflicting studies" → titles name the study perspective or research stance
+- Query says "pros and cons" → titles use Advantages / Disadvantages
+- Query compares entities (A vs B) → titles name the entities
+- Query asks "how / why / what" → titles name the concept or mechanism
+
+NEVER default to generic titles ("Advantages", "Disadvantages", "Overview") when
+the query provides more specific framing.
 
 CRITICAL STRUCTURE RULE
 
@@ -105,11 +126,13 @@ SECTION DESIGN RULES (STRICT)
 * Section titles MUST be:
   - Specific
   - Multi-word
-  - Derived from claim meaning
+  - Derived from BOTH the query framing AND claim meaning
+  - Aligned to what the user asked, not just what the claims say
 
 * Sections MUST NOT:
   - Mix unrelated claims
   - Mix opposing categories (when separable)
+  - Use generic titles when the query provides specific framing
 
 * If a claim contains mixed meaning:
   → Assign to MOST dominant theme
