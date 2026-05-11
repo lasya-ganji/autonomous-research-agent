@@ -7,7 +7,7 @@ Used by utils/evidence_text.py — adjust thresholds and patterns here.
 from typing import FrozenSet
 
 # --- excerpt length ---
-DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS: int = 320
+DEFAULT_EVIDENCE_EXCERPT_MAX_CHARS: int = 900
 
 # --- sentence selection inside a chunk (claim vs sentence overlap) ---
 # If best sentence overlap falls below this, fall back to a prefix slice of cleaned text.
@@ -30,3 +30,12 @@ BASE64_PATTERN: str = r"[A-Za-z0-9+/]{80,}={0,2}"
 NON_WORD_HEAVY_PATTERN: str = r"[^\w\s.,;:!?()'-]"
 WHITESPACE_PATTERN: str = r"\s+"
 SENTENCE_SPLIT_PATTERN: str = r"(?<=[.!?])\s+"
+
+# Bare image filenames that survive markdown cleaning (e.g. "960x0-651.jpg)")
+IMAGE_FILENAME_PATTERN: str = r"\b\w[\w\-]*\.(?:jpg|jpeg|png|gif|webp|svg|ico|bmp|tiff?)[\w\-]*\b\)?"
+
+# Repeated dash/pipe sequences from scraped HTML tables (e.g. "--- --- ---", "| H100 |")
+TABLE_SEPARATOR_PATTERN: str = r"(?:-{2,}\s*){2,}|(?:\|\s*)+"
+
+# Minimum word count for a sentence to be considered non-fragment
+MIN_SENTENCE_WORDS: int = 4

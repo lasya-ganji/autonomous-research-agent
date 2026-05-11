@@ -218,14 +218,6 @@ if run_button:
         report = result.get("report")
         evidence_metrics = safe_get(safe_get(report, "metadata", {}), "evidence_metrics", {}) or {}
 
-        if evidence_metrics:
-            st.subheader("Citation Verification Coverage")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Verified", f"{safe_get(evidence_metrics, 'verified', 0)} ({safe_get(evidence_metrics, 'verified_pct', 0)}%)")
-            c2.metric("Partially Verified", f"{safe_get(evidence_metrics, 'partially_verified', 0)} ({safe_get(evidence_metrics, 'partially_verified_pct', 0)}%)")
-            c3.metric("Unverified", f"{safe_get(evidence_metrics, 'unverified', 0)} ({safe_get(evidence_metrics, 'unverified_pct', 0)}%)")
-            c4.metric("Total Claims", safe_get(evidence_metrics, "total_claims", 0))
-            st.divider()
 
         claims = safe_get(synthesis, "claims", [])
         if claims:
@@ -255,6 +247,15 @@ if run_button:
                 st.divider()
         else:
             st.info("No synthesis available.")
+        
+        if evidence_metrics:
+            st.subheader("Citation Verification Coverage")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Verified", f"{safe_get(evidence_metrics, 'verified', 0)} ({safe_get(evidence_metrics, 'verified_pct', 0)}%)")
+            c2.metric("Partially Verified", f"{safe_get(evidence_metrics, 'partially_verified', 0)} ({safe_get(evidence_metrics, 'partially_verified_pct', 0)}%)")
+            c3.metric("Unverified", f"{safe_get(evidence_metrics, 'unverified', 0)} ({safe_get(evidence_metrics, 'unverified_pct', 0)}%)")
+            c4.metric("Total Claims", safe_get(evidence_metrics, "total_claims", 0))
+            st.divider()
 
         time_taken, runs = get_node_time(node_logs, NODE_KEYS['SYNTHESIS'])
         if runs > 1:
