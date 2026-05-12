@@ -19,6 +19,7 @@ from services.system.cost_tracker import calculate_cost
 from config.constants.node_constants.synthesis_constants import (
     MAX_SYNTHESIS_RESULTS,
     MAX_CHUNKS_PER_DOC,
+    MAX_CHUNKS_FOR_EVIDENCE,
     MAX_CONTEXT_DOCS,
     MAX_CONTEXT_LENGTH,
     MAX_CHUNK_LENGTH,
@@ -88,15 +89,23 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
 
             chunks = chunk_text(content) if r.content else [content]
 
-            scored_chunks = [(c, text_overlap(state.query, c)) for c in chunks]
-            top_chunks = sorted(scored_chunks, key=lambda x: x[1], reverse=True)[:MAX_CHUNKS_PER_DOC]
+            scored_chunks = sorted(
+                [(c, text_overlap(state.query, c)) for c in chunks],
+                key=lambda x: x[1],
+                reverse=True,
+            )
 
-            selected_chunks = [c[0] for c in top_chunks if c[0]]
-            if not selected_chunks:
+            # Top-N for LLM context (query-relevance ranked, smaller pool).
+            context_chunks = [c[0] for c in scored_chunks[:MAX_CHUNKS_PER_DOC] if c[0]]
+            if not context_chunks:
                 continue
 
-            doc_chunks.append((r.citation_id, selected_chunks))
-            state.citation_chunks[r.citation_id] = selected_chunks
+            # Larger pool for per-claim scoring in citation_manager (includes
+            # lower-ranked chunks that may be more relevant to specific claims).
+            evidence_chunks = [c[0] for c in scored_chunks[:MAX_CHUNKS_FOR_EVIDENCE] if c[0]]
+
+            doc_chunks.append((r.citation_id, context_chunks))
+            state.citation_chunks[r.citation_id] = evidence_chunks
 
         i = 0
         while len(context_docs) < MAX_CONTEXT_DOCS:
@@ -261,11 +270,9 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                     if cid in valid_ids_set:
                         filtered_ids.append(cid)
 
-                if not filtered_ids:
-                    dropped_claims += 1
-                    continue
-
-                used_ids.update(filtered_ids)
+                has_supporting_citations = len(filtered_ids) > 0
+                if has_supporting_citations:
+                    used_ids.update(filtered_ids)
 
                 confidence = float(c.get("confidence", 0.5))
                 confidence = max(0.0, min(confidence, 1.0))
@@ -275,8 +282,10 @@ def synthesiser_node(state: ResearchState) -> ResearchState:
                         text=text,
                         citation_ids=filtered_ids,
                         confidence=confidence,
-                        verified=True,
-                        citation_confidence=1.0,
+                        verified=has_supporting_citations,
+                        citation_confidence=1.0 if has_supporting_citations else 0.0,
+                        support_status="partially_verified" if not has_supporting_citations else "verified",
+                        support_reason="missing_initial_citation_support" if not has_supporting_citations else "initial_citation_match",
                     )
                 )
 

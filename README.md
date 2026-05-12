@@ -93,11 +93,11 @@ python -m streamlit run app/streamlit_app.py
 Open http://localhost:8501
 
 Tabs:
-- **Report** — Final output  
+- **Report** — Final output with download button (exports as Markdown)
 - **Plan** — Generated sub-questions  
 - **Search** — Retrieved sources  
 - **Evaluation** — Confidence and decisions  
-- **Synthesis** — Claims with citations  
+- **Synthesis** — Claims with evidence snippets, verification status, and citation coverage metrics  
 - **Citations** — Source list  
 - **Debug** — Logs, tokens, cost  
 

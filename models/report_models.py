@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 
 class ReportModel(BaseModel):
@@ -6,3 +6,4 @@ class ReportModel(BaseModel):
     sections: List[str]
     citations: List[Dict[str, Any]]
     metadata: Dict[str, Any]
+    claim_evidence: List[Dict[str, Any]] = Field(default_factory=list)

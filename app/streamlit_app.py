@@ -64,7 +64,7 @@ query = st.text_input("Research Query", placeholder="Enter your query here...", 
 run_button = st.button("Run Research")
 
 
-# RUN 
+# RUN — store everything in session_state so widget interactions don't wipe the UI
 
 if run_button:
 
@@ -105,6 +105,28 @@ if run_button:
     combined_tokens = result.get("total_tokens", 0) + pre_tokens
     combined_cost = round(result.get("total_cost", 0) + pre_cost, 4)
 
+    # Persist everything in session_state
+    st.session_state["result"] = result
+    st.session_state["intent_meta"] = intent_meta
+    st.session_state["reframe_meta"] = reframe_meta
+    st.session_state["active_query"] = active_query
+    st.session_state["total_time"] = total_time
+    st.session_state["combined_tokens"] = combined_tokens
+    st.session_state["combined_cost"] = combined_cost
+
+
+# RENDER — outside if run_button so any widget interaction keeps the UI intact
+
+if "result" in st.session_state:
+
+    result = st.session_state["result"]
+    intent_meta = st.session_state["intent_meta"]
+    reframe_meta = st.session_state["reframe_meta"]
+    active_query = st.session_state["active_query"]
+    total_time = st.session_state["total_time"]
+    combined_tokens = st.session_state["combined_tokens"]
+    combined_cost = st.session_state["combined_cost"]
+
     st.success(f"Research completed in {total_time}s")
 
     node_logs = result.get("node_logs", {})
@@ -113,7 +135,7 @@ if run_button:
         "Report", "Plan", "Search", "Evaluation", "Synthesis", "Citations", "Debug"
     ])
 
-    # REPORT 
+    # REPORT
     with tab1:
         report = result.get("report")
 
@@ -121,6 +143,12 @@ if run_button:
             sections = safe_get(report, "sections", [])
             if sections:
                 render_report(sections[0])
+                st.download_button(
+                    label="Download Report",
+                    data=sections[0],
+                    file_name="research_report.md",
+                    mime="text/markdown",
+                )
             else:
                 st.warning("Report content is empty.")
         else:
@@ -134,7 +162,7 @@ if run_button:
             st.caption(f"Time: {time_taken}s")
 
 
-    # PLAN 
+    # PLAN
     with tab2:
         st.subheader("Research Plan")
 
@@ -155,7 +183,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # SEARCH 
+    # SEARCH
     with tab3:
         st.subheader("Search Results")
 
@@ -210,11 +238,13 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # SYNTHESIS 
+    # SYNTHESIS
     with tab5:
         st.subheader("Synthesised Claims")
 
         synthesis = result.get("synthesis")
+        report = result.get("report")
+        evidence_metrics = safe_get(safe_get(report, "metadata", {}), "evidence_metrics", {}) or {}
 
         claims = safe_get(synthesis, "claims", [])
         if claims:
@@ -224,13 +254,35 @@ if run_button:
                 citation_ids = safe_get(claim, "citation_ids", []) or []
                 verified = safe_get(claim, "verified", False)
                 citation_text = " ".join(citation_ids) if verified else "UNVERIFIED"
+                support_status = safe_get(claim, "support_status", "partially_verified")
+                support_reason = safe_get(claim, "support_reason", "citation_support_pending")
 
                 st.caption(
-                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text}"
+                    f"Confidence: {round(safe_get(claim, 'confidence', 0), 2)} | Citations: {citation_text} | Status: {support_status.upper()} ({support_reason})"
                 )
+
+                evidence_items = safe_get(claim, "evidence", []) or []
+                if evidence_items:
+                    for ev in evidence_items:
+                        cid = safe_get(ev, "citation_id", "")
+                        score = round(safe_get(ev, "support_score", 0), 3)
+                        snippet = safe_get(ev, "evidence_snippet", "")
+                        source_title = safe_get(ev, "source_title", "")
+                        st.markdown(f"**{cid} {source_title}** (score: {score})")
+                        if snippet:
+                            st.code(snippet, language="text")
                 st.divider()
         else:
             st.info("No synthesis available.")
+
+        if evidence_metrics:
+            st.subheader("Citation Verification Coverage")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Verified", f"{safe_get(evidence_metrics, 'verified', 0)} ({safe_get(evidence_metrics, 'verified_pct', 0)}%)")
+            c2.metric("Partially Verified", f"{safe_get(evidence_metrics, 'partially_verified', 0)} ({safe_get(evidence_metrics, 'partially_verified_pct', 0)}%)")
+            c3.metric("Unverified", f"{safe_get(evidence_metrics, 'unverified', 0)} ({safe_get(evidence_metrics, 'unverified_pct', 0)}%)")
+            c4.metric("Total Claims", safe_get(evidence_metrics, "total_claims", 0))
+            st.divider()
 
         time_taken, runs = get_node_time(node_logs, NODE_KEYS['SYNTHESIS'])
         if runs > 1:
@@ -259,6 +311,7 @@ if run_button:
                     st.caption(f"Quality: {round(quality, 3)}")
 
                 st.divider()
+
         else:
             st.info("No citations available.")
 
@@ -268,7 +321,7 @@ if run_button:
         else:
             st.caption(f"Time: {time_taken}s")
 
-    # DEBUG / COST / ERRORS 
+    # DEBUG / COST / ERRORS
     with tab7:
         st.subheader("Pre-Pipeline")
 
@@ -299,9 +352,9 @@ if run_button:
         if node_logs:
             for node, data in node_logs.items():
                 if node == "citation":
-                    continue 
+                    continue
                 with st.expander(f"{node} NODE"):
-                    
+
                     debug_data = {k: v for k, v in data.items() if k != "_trace"}
 
                     if debug_data:
@@ -320,7 +373,7 @@ if run_button:
         st.subheader("Execution Metrics")
         st.write(f"Total Tokens: {combined_tokens}")
         st.write(f"Total Cost (₹): {combined_cost}")
-        
+
         st.write(f"Final Node Execution Count: {result.get('node_execution_count', 0)}")
 
         if result.get("abort"):

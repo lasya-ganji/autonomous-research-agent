@@ -1,5 +1,8 @@
 MAX_SYNTHESIS_RESULTS = 12
-MAX_CHUNKS_PER_DOC = 3
+MAX_CHUNKS_PER_DOC = 5
+# Larger pool stored in citation_chunks for per-claim scoring in citation_manager.
+# Must be >= MAX_CHUNKS_PER_DOC.
+MAX_CHUNKS_FOR_EVIDENCE = 8
 MAX_CONTEXT_DOCS = 25
 MAX_CONTEXT_LENGTH = 22000
 MAX_CHUNK_LENGTH = 1200

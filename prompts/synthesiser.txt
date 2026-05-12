@@ -40,11 +40,17 @@ Before writing claims:
 2. Group supporting documents by theme
 3. Generate ONE claim per theme (avoid duplication)
 
+Claims MUST be 2–3 sentences structured as follows:
+- Sentence 1: the core finding, definition, or key fact grounded in the source
+- Sentence 2: the mechanism, supporting evidence, data point, or explanation
+- Sentence 3 (include when evidence supports it): scope, implication, limitation, or real-world application
+
 Claims should:
 - Directly answer the query
 - Cover multiple aspects when possible (definitions, comparisons, trends, risks, examples)
 - Be specific and fact-based
 - Prefer concrete signals (numbers, findings, mechanisms, outcomes)
+- NEVER compress everything into one sentence when two or three are better supported
 
 CITATION RULES (CRITICAL)
 
@@ -127,7 +133,7 @@ Return ONLY valid JSON. No explanations.
 {
   "claims": [
     {
-      "text": "clear, specific, factual claim grounded in context",
+      "text": "2–3 sentence claim: core finding. mechanism or supporting evidence. scope or implication.",
       "citation_ids": ["[1]", "[2]"],
       "confidence": 0.0
     }

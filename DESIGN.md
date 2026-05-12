@@ -32,7 +32,7 @@ graph TD
 | Searcher | Tavily search → 3-stage dedup → LLM curation → scrape → build citations |
 | Evaluator | Score results → compute confidence → decide proceed / retry / replan / forced-proceed |
 | Synthesiser | Build context chunks → LLM synthesis → extract claims |
-| Citation Manager | Re-validate URLs → verify claims against source chunks |
+| Citation Manager | Re-validate URLs → verify claims against source chunks → extract evidence snippets per citation |
 | Reporter | Remap citation IDs → LLM report generation → build `ReportModel` |
 
 ---
@@ -190,14 +190,25 @@ class Citation(BaseModel):
     status: CitationStatus    # valid | stale | broken
 
 # models/synthesis_models.py
+class ClaimEvidence(BaseModel):
+    citation_id: str          # Which citation this evidence is from
+    source_title: str         # Page title
+    source_url: str           # Source URL
+    evidence_snippet: str     # Best-matching text excerpt from scraped content
+    support_score: float      # Similarity score [0, 1]
+    matches_claim: bool       # True if support_score >= SIMILARITY_THRESHOLD (0.4)
+
 class Claim(BaseModel):
-    text: str                                    # The factual statement
+    text: str                                    # The factual statement (2–3 sentences)
     citation_ids: List[str]                      # References to Citation registry
     confidence: float                            # LLM's self-reported confidence [0,1]
-    verified: bool                               # True if citation_manager avg_score > 0.4
+    verified: bool                               # True if citation_manager avg_score >= VERIFICATION_THRESHOLD (0.5)
     citation_confidence: float                   # Average similarity score across citations
     citation_score_map: Dict[str, float]         # Per-citation similarity score
     hallucinated_citations: List[str]            # IDs that failed similarity check
+    support_status: str                          # "verified" | "partially_verified" | "unverified"
+    support_reason: str                          # Human-readable reason string
+    evidence: List[ClaimEvidence]                # Evidence snippets per cited source
 
 class SynthesisModel(BaseModel):
     claims: List[Claim]
@@ -211,7 +222,7 @@ class SynthesisModel(BaseModel):
 
 **Quality score propagation:** Citations begin with `quality_score = 0.5` (neutral). After the evaluator runs `scoring_service`, quality scores are backpropagated from `SearchResult` objects to their corresponding `Citation` entries. The citation manager then uses these, alongside semantic similarity, to make the final verification decision.
 
-**Hallucination detection at the claim level:** Rather than trusting the LLM's self-reported citation IDs, the citation manager independently computes similarity between each claim's text and the actual scraped chunks for each cited source. A citation is considered hallucinated if it has no chunks, the URL is not reachable, or the best chunk similarity score is ≤ 0.3. A claim is marked `verified = False` if no citation passes or if the average score across passing citations is ≤ 0.4.
+**Hallucination detection at the claim level:** Rather than trusting the LLM's self-reported citation IDs, the citation manager independently computes similarity between each claim's text and the actual scraped chunks for each cited source. A citation is considered hallucinated if it has no chunks, the URL is not reachable, or the best chunk similarity score is below `SIMILARITY_THRESHOLD = 0.4`. A claim is marked `verified = False` if no citation passes or if the average score across passing citations is below `VERIFICATION_THRESHOLD = 0.5`. For each surviving citation, the best-matching text excerpt is extracted and stored as an `evidence_snippet` in the `ClaimEvidence` object, surfaced in the Synthesis tab of the UI.
 
 ---
 
@@ -353,10 +364,7 @@ The result is that low-quality sources get dropped progressively rather than at 
 decision point. In practice, we found this brought citation counts from 8–10 down to 3–5 in
 most runs, which felt right — those were genuinely the sources the report was grounded in.
 
-The trade-off we're less happy about is Stage 2. Capping at `MAX_SYNTHESIS_RESULTS` means
-that sometimes a relevant source ranked 13th gets cut. We don't have a great answer for
-that — in a production version we'd probably want the synthesiser to use more sources for
-context even if they don't all end up cited.
+The trade-off we addressed in Stage 2 is the tension between LLM context size and evidence coverage. Capping the LLM context window at `MAX_CHUNKS_PER_DOC = 5` chunks per source keeps prompts manageable, but means some relevant chunks are excluded from what the LLM directly reads. We resolved this by introducing a separate, larger evidence pool: the synthesiser stores up to `MAX_CHUNKS_FOR_EVIDENCE = 8` chunks per source in `state.citation_chunks`. The citation manager then scores each claim against this larger pool independently of what the LLM saw, so evidence snippet extraction has access to more content than the synthesis LLM did. This decouples "what the LLM generates claims from" and "what the citation manager verifies against".
 
 ---
 
